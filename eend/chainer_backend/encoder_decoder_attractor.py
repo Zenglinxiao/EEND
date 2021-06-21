@@ -38,7 +38,8 @@ class EncoderDecoderAttractor(Chain):
 
         xp = cuda.get_array_module(xs[0])
         zeros = [xp.zeros((max_n_speakers, self.n_units), dtype=xp.float32) for _ in xs]
-        attractors = self.forward(xs, zeros)
+        attractors = self.forward(xs, zeros)  # [(max_n_speakers, N)]
+        # [(max_n_speakers, N) --counter.forward--> (max_n_speakers, 1) --flatten--> (max_n_speakers) --sigmoid--> (max_n_speakers)]
         probs = [F.sigmoid(F.flatten(self.counter(att))) for att in attractors]
         return attractors, probs
 
@@ -56,12 +57,14 @@ class EncoderDecoderAttractor(Chain):
 
         xp = cuda.get_array_module(xs[0])
         zeros = [xp.zeros((n_spk + 1, self.n_units), dtype=xp.float32) for n_spk in n_speakers]
-        attractors = self.forward(xs, zeros)
+        attractors = self.forward(xs, zeros)  # [(n_spk+1, N)]
+        # [(1, n_spk+1)] --concat--> (1, sum(n_spk+1))
         labels = F.concat([xp.array([[1] * n_spk + [0]], xp.int32) for n_spk in n_speakers], axis=1)
+        # [att (n_spk+1, N) --counter.forward-> (n_spk+1, 1) --reshape-> (1, n_spk+1)] --concat--> (1, sum(n_spk+1))
         logit = F.concat([F.reshape(self.counter(att), (-1, n_spk + 1)) for att, n_spk in zip(attractors, n_speakers)], axis=1)
         loss = F.sigmoid_cross_entropy(logit, labels)
 
         # The final attractor does not correspond to a speaker so remove it
         # attractors = [att[:-1] for att in attractors]
-        attractors = [att[slice(0, att.shape[0] - 1)] for att in attractors]
+        attractors = [att[slice(0, att.shape[0] - 1)] for att in attractors]  # [(n_spk, N)]
         return loss, attractors

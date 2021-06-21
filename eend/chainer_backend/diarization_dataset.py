@@ -59,12 +59,15 @@ class KaldiDiarizationDataset(chainer.dataset.DatasetMixin):
 
         # make chunk indices: filepath, start_frame, end_frame
         for rec in self.data.wavs:
+            # data_len: num of frames after frame subsampling
             data_len = int(self.data.reco2dur[rec] * rate / frame_shift)
             data_len = int(data_len / self.subsampling)
+            # start and end frame index for each chunk with size chunk_size
             for st, ed in _gen_frame_indices(
                     data_len, chunk_size, chunk_size, use_last_samples,
                     label_delay=self.label_delay,
                     subsampling=self.subsampling):
+                # return start and end frame index before subsampling
                 self.chunk_indices.append(
                     (rec, st * self.subsampling, ed * self.subsampling))
         print(len(self.chunk_indices), " chunks")
@@ -75,18 +78,35 @@ class KaldiDiarizationDataset(chainer.dataset.DatasetMixin):
         return len(self.chunk_indices)
 
     def get_example(self, i):
+        """Return transformed chunk[i].
+
+        get chunk i (may contain multiple segment from the same record)
+        -> get all speaker in the record, Dict them
+        -> get Y = STFT(chunk), build speaker label T cor. to Y w kaldi file
+        Y -> transform -> splice -> subsample [-> shuffle]
+        T -> subsample [-> trim if given n_speaker -> shuffle]
+
+        Returns:
+            * Y (n_frames_ss, D)-shaped np.complex64 array
+            * T (n_frames_ss, n_speakers)
+        """
+        # st, ed: start and end frame index before subsampling for chunked rec
         rec, st, ed = self.chunk_indices[i]
-        Y, T = feature.get_labeledSTFT(
+        # T: (n_frames, num_speakers)
             self.data,
             rec,
             st,
             ed,
             self.frame_size,
             self.frame_shift,
-            self.n_speakers)
+        # Y: (n_frames, num_ceps)
         Y = feature.transform(Y, self.input_transform)
+        # Y_spliced: (n_frames, num_ceps * (context_size * 2 + 1))
         Y_spliced = feature.splice(Y, self.context_size)
-        Y_ss, T_ss = feature.subsample(Y_spliced, T, self.subsampling)
+        # Y_ss: (n_frames / subsampling, num_ceps * (context_size * 2 + 1))
+        Y_ss, T_ss = feature.subsample(
+            Y_spliced, T, subsampling=self.subsampling
+        )
 
         # If the sample contains more than "self.n_speakers" speakers,
         #  extract top-(self.n_speakers) speakers

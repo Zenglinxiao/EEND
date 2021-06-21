@@ -157,6 +157,7 @@ class KaldiData:
                 os.path.join(self.data_dir, 'spk2utt'))
 
     def load_wav(self, recid, start=0, end=None):
+        """Load `recid` wav, within [`start`, `end`) sample."""
         data, rate = load_wav(
             self.wavs[recid], start, end)
         return data, rate

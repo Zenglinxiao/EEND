@@ -107,7 +107,10 @@ def infer(args):
             outdata = shift(np.vstack(out_chunks), (-model.label_delay, 0))
         else:
             max_n_speakers = max([o.shape[1] for o in out_chunks])
+            # out_chunks: padding [(T, speaker_active)]  --> [(T, max_n_speakers)]
+            # FIXME: where inter-chunk label permutation comes
             out_chunks = [np.insert(o, o.shape[1], np.zeros((max_n_speakers - o.shape[1], o.shape[0])), axis=1) for o in out_chunks]
+            # outdata: --vstack-> (B, T, max_n_speakers)
             outdata = np.vstack(out_chunks)
         with h5py.File(outpath, 'w') as wf:
             wf.create_dataset('T_hat', data=outdata)

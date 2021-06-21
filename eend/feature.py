@@ -244,11 +244,16 @@ def get_labeledSTFT(
         T: label
             (n_frmaes, n_speakers)-shaped np.int32 array.
     """
+    # * frame_shift to get back to sample position
     data, rate = kaldi_obj.load_wav(
         rec, start * frame_shift, end * frame_shift)
     Y = stft(data, frame_size, frame_shift)
+    # segments: dict(rec: [{"utt": utt, "st": st, "et": et}])
     filtered_segments = kaldi_obj.segments[rec]
     # filtered_segments = kaldi_obj.segments[kaldi_obj.segments['rec'] == rec]
+    # NOTE [utt --.utt2spk--> spkid]
+    # speakers: sorted(set(speakers)) in this (whole) record of all segments
+    # vary by records
     speakers = np.unique(
         [kaldi_obj.utt2spk[seg['utt']] for seg
          in filtered_segments]).tolist()
@@ -257,18 +262,23 @@ def get_labeledSTFT(
     T = np.zeros((Y.shape[0], n_speakers), dtype=np.int32)
 
     if use_speaker_id:
+        # NOTE all speaker contained in the kaldi data(train/eval set)
         all_speakers = sorted(kaldi_obj.spk2utt.keys())
         S = np.zeros((Y.shape[0], len(all_speakers)), dtype=np.int32)
 
     for seg in filtered_segments:
+        # speaker_index of this segment
         speaker_index = speakers.index(kaldi_obj.utt2spk[seg['utt']])
         if use_speaker_id:
             all_speaker_index = all_speakers.index(kaldi_obj.utt2spk[seg['utt']])
+        # start_frame, end_frame of this segment
         start_frame = np.rint(
             seg['st'] * rate / frame_shift).astype(int)
         end_frame = np.rint(
             seg['et'] * rate / frame_shift).astype(int)
         rel_start = rel_end = None
+        # start, end: for loaded record chunk
+        # relative position w.r.t. loaded record chunk (data)
         if start <= start_frame and start_frame < end:
             rel_start = start_frame - start
         if start < end_frame and end_frame <= end:

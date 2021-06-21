@@ -451,41 +451,46 @@ class TransformerEDADiarization(chainer.Chain):
         return emb
 
     def estimate_sequential(self, hx, xs, **kwargs):
-        emb = self.forward(xs)
+        emb = self.forward(xs)  # [(T, E)]
         ys_active = []
         n_speakers = kwargs.get('n_speakers')
         th = kwargs.get('th')
         shuffle = kwargs.get('shuffle')
-        if shuffle:
+        if shuffle:  # shuffle emb extracted by Transformer along axis T
             xp = cuda.get_array_module(emb[0])
             orders = [xp.arange(e.shape[0]) for e in emb]
             for order in orders:
                 xp.random.shuffle(order)
             attractors, probs = self.eda.estimate([e[order] for e, order in zip(emb, orders)])
         else:
+            # [(max_n_speakers, N)], [(max_n_speakers)]
             attractors, probs = self.eda.estimate(emb)
+        # [(T, E) X (max_n_speakers, N).T]  --> [(T, max_n_speakers)]  NOTE N==E
         ys = [F.matmul(e, att, transb=True) for e, att in zip(emb, attractors)]
         ys = [F.sigmoid(y) for y in ys]
         for p, y in zip(probs, ys):
             if n_speakers is not None:
-                ys_active.append(y[:, :n_speakers])
-            elif th is not None:
-                silence = np.where(cuda.to_cpu(p.data) < th)[0]
+                ys_active.append(y[:, :n_speakers])  # (T, n_speakers)
+            elif th is not None:  # \tau in equation 8
+                # return indices of elements that are non-zeros: (max_n_speakers) -> (speakers_silent)
+                silence = np.where(cuda.to_cpu(p.data) < th)[0]  # list of silent speaker ids
+                # get first silent speaker id (=trim on first not speak)
                 n_spk = silence[0] if silence.size else None
-                ys_active.append(y[:, :n_spk])
+                ys_active.append(y[:, :n_spk])  # (T, speaker_active)
             else:
                 NotImplementedError('n_speakers or th has to be given.')
         return None, ys_active
 
     def __call__(self, xs, ts):
         n_speakers = [t.shape[1] for t in ts]
-        emb = self.forward(xs, n_speakers)
-        attractor_loss, attractors = self.eda(emb, n_speakers)
-        # ys: [(T, C), ...]
+        emb = self.forward(xs, n_speakers)  # [(T, E)]
+        attractor_loss, attractors = self.eda(emb, n_speakers)  # scalar, [(n_spk, N)]  NOTE N==E
+        # ys: [(T, C), ...]   # [(T, E) X (n_spk,N).T] -> [(T, n_spk)]
         ys = [F.matmul(e, att, transb=True) for e, att in zip(emb, attractors)]
 
         max_n_speakers = max(n_speakers)
         ts_padded = pad_labels(ts, max_n_speakers)
+        # [(T, max_n_speakers)] NOTE same shape for all item as padded
         ys_padded = pad_results(ys, max_n_speakers)
 
         if configuration.config.train:
