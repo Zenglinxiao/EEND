@@ -532,10 +532,14 @@ class GlobalSpeakerEmbeddingsLoss(chainer.Chain):
         super().__init__()
         with self.init_scope():
             if initialW is None:
-                initialW = chainer.initializers.normal.Normal(1.0)
-            self.emb = L.EmbedID(in_size, out_size)
-            self.alpha = chainer.variable.Parameter(initialW, (1, 1))
-            self.beta = chainer.variable.Parameter(initialW, (1, 1))
+                initialW = chainer.initializers.GlorotNormal()
+            self.emb = L.EmbedID(in_size, out_size, initialW=initialW)
+            self.alpha = chainer.variable.Parameter(
+                chainer.initializers.One(), (1, 1)
+            )
+            self.beta = chainer.variable.Parameter(
+                chainer.initializers.Zero(), (1, 1)
+            )
         self._M = in_size
 
     def forward(self, spk_embs, spk_ids):
