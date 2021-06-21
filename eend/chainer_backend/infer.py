@@ -18,17 +18,15 @@ from eend import kaldi_data
 from eend import system_info
 
 
-def _gen_chunk_indices(data_len, chunk_size):
-    step = chunk_size
-    start = 0
-    while start < data_len:
-        end = min(data_len, start + chunk_size)
-        yield start, end
-        start += step
-
-
 def infer(args):
     system_info.print_system_info()
+
+    inference_kwargs = {
+        "chunk_size": args.chunk_size,
+        "gpu": -1,
+        "out_dir": args.out_dir,
+        "save_attention_weight": args.save_attention_weight
+    }
 
     # Prepare model
     in_size = feature.get_input_dim(
@@ -56,6 +54,9 @@ def infer(args):
                 attractor_encoder_dropout=args.attractor_encoder_dropout,
                 attractor_decoder_dropout=args.attractor_decoder_dropout,
             )
+            inference_kwargs["num_speakers"] = args.num_speakers
+            inference_kwargs["attractor_threshold"] = args.attractor_threshold
+            inference_kwargs["shuffle"] = args.shuffle
         else:
             model = TransformerDiarization(
                 args.num_speakers,
@@ -73,6 +74,7 @@ def infer(args):
     if args.gpu >= 0:
         gpuid = use_single_gpu()
         model.to_gpu()
+        inference_kwargs["gpu"] = gpuid
 
     kaldi_obj = kaldi_data.KaldiData(args.data_dir)
     for recid in kaldi_obj.wavs:
@@ -81,26 +83,11 @@ def infer(args):
         Y = feature.transform(Y, transform_type=args.input_transform)
         Y = feature.splice(Y, context_size=args.context_size)
         Y = Y[::args.subsampling]
-        out_chunks = []
-        with chainer.no_backprop_mode(), chainer.using_config('train', False):
-            hs = None
-            for start, end in _gen_chunk_indices(len(Y), args.chunk_size):
-                Y_chunked = Variable(Y[start:end])
-                if args.gpu >= 0:
-                    Y_chunked.to_gpu(gpuid)
-                hs, ys = model.estimate_sequential(
-                    hs, [Y_chunked],
-                    n_speakers=args.num_speakers,
-                    th=args.attractor_threshold,
-                    shuffle=args.shuffle
-                )
-                if args.gpu >= 0:
-                    ys[0].to_cpu()
-                out_chunks.append(ys[0].data)
-                if args.save_attention_weight == 1:
-                    att_fname = f"{recid}_{start}_{end}.att.npy"
-                    att_path = os.path.join(args.out_dir, att_fname)
-                    model.save_attention_weight(att_path)
+        out_chunks = model.inference(
+            Y,
+            recid=recid,
+            **inference_kwargs
+        )
         outfname = recid + '.h5'
         outpath = os.path.join(args.out_dir, outfname)
         if hasattr(model, 'label_delay'):

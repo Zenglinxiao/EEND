@@ -339,7 +339,58 @@ def dc_loss(embedding, label):
     return loss
 
 
-class TransformerDiarization(chainer.Chain):
+class EENDModel(chainer.Chain):
+
+    @staticmethod
+    def _gen_chunk_indices(data_len, chunk_size):
+        step = chunk_size
+        start = 0
+        while start < data_len:
+            end = min(data_len, start + chunk_size)
+            yield start, end
+            start += step
+
+    def estimate_sequential(self, hx, xs, **kwargs):
+        """Predict function to override for children class."""
+        raise NotImplementedError
+
+    def inference(
+        self,
+        Y,
+        recid,
+        gpu,
+        chunk_size,
+        out_dir,
+        save_attention_weight,
+        num_speakers,
+        attractor_threshold,
+        shuffle,
+    ):
+        """Default inference pipe for EEND models."""
+        out_chunks = []
+        with chainer.no_backprop_mode(), chainer.using_config('train', False):
+            hs = None
+            for start, end in self._gen_chunk_indices(len(Y), chunk_size):  # chunking record
+                Y_chunked = chainer.Variable(Y[start:end])
+                if gpu >= 0:
+                    Y_chunked.to_gpu(gpu)
+                hs, ys = self.estimate_sequential(
+                    hs, [Y_chunked],
+                    n_speakers=num_speakers,
+                    th=attractor_threshold,
+                    shuffle=shuffle
+                )
+                if gpu >= 0:
+                    ys[0].to_cpu()
+                out_chunks.append(ys[0].data)
+                if save_attention_weight == 1:
+                    att_fname = f"{recid}_{start}_{end}.att.npy"
+                    att_path = os.path.join(out_dir, att_fname)
+                    self.save_attention_weight(att_path)
+        return out_chunks
+
+
+class TransformerDiarization(EENDModel):
 
     def __init__(self,
                  n_speakers,
@@ -406,7 +457,7 @@ class TransformerDiarization(chainer.Chain):
         np.save(ofile, np.array(att_weights))
 
 
-class TransformerEDADiarization(chainer.Chain):
+class TransformerEDADiarization(EENDModel):
 
     def __init__(self, in_size, n_units, n_heads, n_layers, dropout,
                  attractor_loss_ratio=1.0,
@@ -518,7 +569,7 @@ class TransformerEDADiarization(chainer.Chain):
         np.save(ofile, np.array(att_weights))
 
 
-class BLSTMDiarization(chainer.Chain):
+class BLSTMDiarization(EENDModel):
 
     def __init__(self,
                  n_speakers=4,
