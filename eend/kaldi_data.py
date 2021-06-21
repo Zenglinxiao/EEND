@@ -161,3 +161,8 @@ class KaldiData:
         data, rate = load_wav(
             self.wavs[recid], start, end)
         return data, rate
+
+    @property
+    def global_speakers(self):
+        """Return all speakers contained in this kaldi data."""
+        return sorted(self.spk2utt.keys())

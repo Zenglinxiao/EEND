@@ -42,6 +42,7 @@ class KaldiDiarizationDataset(chainer.dataset.DatasetMixin):
             label_delay=0,
             n_speakers=None,
             shuffle=False,
+            use_global_speaker_id=False,
     ):
         self.data_dir = data_dir
         self.dtype = dtype
@@ -73,6 +74,7 @@ class KaldiDiarizationDataset(chainer.dataset.DatasetMixin):
         print(len(self.chunk_indices), " chunks")
 
         self.shuffle = shuffle
+        self.use_global_speaker_id = use_global_speaker_id
 
     def __len__(self):
         return len(self.chunk_indices)
@@ -93,12 +95,21 @@ class KaldiDiarizationDataset(chainer.dataset.DatasetMixin):
         # st, ed: start and end frame index before subsampling for chunked rec
         rec, st, ed = self.chunk_indices[i]
         # T: (n_frames, num_speakers)
+        # spk_idxs: (num_speakers) map from local spk to global spk
+        _feature_res = feature.get_labeledSTFT(
             self.data,
             rec,
             st,
             ed,
             self.frame_size,
             self.frame_shift,
+            self.n_speakers,
+            use_global_speaker_id=self.use_global_speaker_id,
+        )
+        if self.use_global_speaker_id:
+            Y, T, spk_idxs = _feature_res
+        else:
+            Y, T = _feature_res
         # Y: (n_frames, num_ceps)
         Y = feature.transform(Y, self.input_transform)
         # Y_spliced: (n_frames, num_ceps * (context_size * 2 + 1))
@@ -113,6 +124,9 @@ class KaldiDiarizationDataset(chainer.dataset.DatasetMixin):
         if self.n_speakers and T_ss.shape[1] > self.n_speakers:
             selected_speakers = np.argsort(T_ss.sum(axis=0))[::-1][:self.n_speakers]
             T_ss = T_ss[:, selected_speakers]
+            if self.use_global_speaker_id:
+                # TODO: how to deal with spk_idxs?
+                spk_idxs = spk_idxs[selected_speakers]
 
         # If self.shuffle is True, shuffle the order in time-axis
         # This operation improves the performance of EEND-EDA
@@ -122,4 +136,7 @@ class KaldiDiarizationDataset(chainer.dataset.DatasetMixin):
             Y_ss = Y_ss[order]
             T_ss = T_ss[order]
 
-        return Y_ss, T_ss
+        if self.use_global_speaker_id:
+            return Y_ss, T_ss, spk_idxs
+        else:
+            return Y_ss, T_ss

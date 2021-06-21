@@ -220,10 +220,12 @@ def get_frame_labels(
 
 
 def get_labeledSTFT(
-        kaldi_obj,
-        rec, start, end, frame_size, frame_shift,
-        n_speakers=None,
-        use_speaker_id=False):
+    kaldi_obj,
+    rec, start, end, frame_size, frame_shift,
+    n_speakers=None,
+    use_speaker_id=False,
+    use_global_speaker_id=False,
+):
     """ Extracts STFT and corresponding labels
 
     Extracts STFT and corresponding diarization labels for
@@ -242,7 +244,11 @@ def get_labeledSTFT(
         Y: STFT
             (n_frames, n_bins)-shaped np.complex64 array,
         T: label
-            (n_frmaes, n_speakers)-shaped np.int32 array.
+            (n_frames, n_speakers)-shaped np.int32 array.
+        global_speaker_idx: speaker index
+            (n_speakers)-shaped np.int32 array correspond to T.
+        # S: absolute label
+        #     (n_frames, all_speakers)-shaped np.int32 array.
     """
     # * frame_shift to get back to sample position
     data, rate = kaldi_obj.load_wav(
@@ -266,6 +272,12 @@ def get_labeledSTFT(
         all_speakers = sorted(kaldi_obj.spk2utt.keys())
         S = np.zeros((Y.shape[0], len(all_speakers)), dtype=np.int32)
 
+    if use_global_speaker_id:
+        all_speakers = sorted(kaldi_obj.spk2utt.keys())
+        global_speaker_idx = np.array(
+            [all_speakers.index(spk) for spk in speakers], dtype=np.int8
+        )
+
     for seg in filtered_segments:
         # speaker_index of this segment
         speaker_index = speakers.index(kaldi_obj.utt2spk[seg['utt']])
@@ -288,7 +300,9 @@ def get_labeledSTFT(
             if use_speaker_id:
                 S[rel_start:rel_end, all_speaker_index] = 1
 
-    if use_speaker_id:
+    if use_global_speaker_id:
+        return Y, T, global_speaker_idx
+    elif use_speaker_id:
         return Y, T, S
     else:
         return Y, T
