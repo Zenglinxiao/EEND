@@ -92,7 +92,7 @@ def train(args):
     )
 
     # Prepare model
-    Y, T = train_set.get_example(0)
+    Y = train_set.get_example(0)[0]
 
     if args.model_type == 'BLSTM':
         assert args.num_speakers is not None
@@ -129,7 +129,7 @@ def train(args):
             )
     elif args.model_type == 'TransformerSpkVector':
         assert args.num_speakers is not None
-        glb_spk = train_set.data.global_speakers
+        glb_spk = train_set.data.global_speakers_with_silent
         num_global_spks = len(glb_spk)
         print(f"Found {num_global_spks} speaker in training set.")
         model = TransformerVectorDiarization(

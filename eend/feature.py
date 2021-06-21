@@ -273,10 +273,13 @@ def get_labeledSTFT(
         S = np.zeros((Y.shape[0], len(all_speakers)), dtype=np.int32)
 
     if use_global_speaker_id:
-        all_speakers = sorted(kaldi_obj.spk2utt.keys())
-        global_speaker_idx = np.array(
-            [all_speakers.index(spk) for spk in speakers], dtype=np.int8
-        )
+        global_speakers = kaldi_obj.global_speakers_with_silent
+        # Init with zeros, handle case: active speaker < S_local, 0 for silent
+        global_speaker_idx = np.zeros((n_speakers, ), dtype=np.int32)
+        # set active speaker in the chunk
+        global_speaker_idx[:len(speakers)] = [
+            global_speakers.index(spk) for spk in speakers
+        ]
 
     for seg in filtered_segments:
         # speaker_index of this segment

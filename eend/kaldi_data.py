@@ -143,6 +143,9 @@ def extract_segments(wavs, segments=None):
 
 
 class KaldiData:
+
+    SILENT_SPEAKER = "[SILENT]"
+
     def __init__(self, data_dir):
         self.data_dir = data_dir
         self.segments = load_segments_rechash(
@@ -166,3 +169,8 @@ class KaldiData:
     def global_speakers(self):
         """Return all speakers contained in this kaldi data."""
         return sorted(self.spk2utt.keys())
+
+    @property
+    def global_speakers_with_silent(self):
+        """Return all speakers in this kaldi data with silent pad (first)."""
+        return [self.SILENT_SPEAKER] + self.global_speakers
