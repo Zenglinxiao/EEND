@@ -277,9 +277,9 @@ def get_labeledSTFT(
         # Init with zeros, handle case: active speaker < S_local, 0 for silent
         global_speaker_idx = np.zeros((n_speakers, ), dtype=np.int32)
         # set active speaker in the chunk
-        global_speaker_idx[:len(speakers)] = [
-            global_speakers.index(spk) for spk in speakers
-        ]
+        # NOTE :n_speakers to remove speakers exceed n_speakers
+        _gsidx = [global_speakers.index(spk) for spk in speakers[:n_speakers]]
+        global_speaker_idx[:len(_gsidx)] = _gsidx
 
     for seg in filtered_segments:
         # speaker_index of this segment
