@@ -203,7 +203,7 @@ def train(args):
         out=os.path.join(args.model_save_dir))
 
     evaluator = extensions.Evaluator(
-        dev_iter, model, converter=_convert, device=gpuid)
+        dev_iter, model, converter=fn_convert, device=gpuid)
     trainer.extend(evaluator)
 
     if args.optimizer == 'noam':
