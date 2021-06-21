@@ -553,7 +553,7 @@ class GlobalSpeakerEmbeddingsLoss(chainer.Chain):
 
         """
         xp = chainer.backend.get_array_module(spk_embs[0])
-        res = []
+        res = chainer.Variable(xp.zeros((1,), dtype=spk_embs[0].dtype))
         # all_emb: (_M, out_size)
         all_emb = self.emb(xp.arange(self._M))
         for spk_emb, spk_id in zip(spk_embs, spk_ids):
@@ -581,8 +581,8 @@ class GlobalSpeakerEmbeddingsLoss(chainer.Chain):
             loss_spk = F.select_item(nll_dist, spk_id)
             # loss_spk (scalar): reduce loss by mean
             loss_spk = F.mean(loss_spk)
-            res.append(loss_spk)
-        res = F.mean(xp.array(res))
+            res += loss_spk
+        res /= len(spk_ids)
         return res
 
 
@@ -692,8 +692,8 @@ class TransformerVectorDiarization(EENDModel):
 
         # TODO speaker embedding loss
         # permute reference speaker id as min PIT loss
-        perm_spk_ids = [s[p] for p, s in zip(min_perms, spk_id)]
-        perm_spk_emb = [emb[p] for p, emb in zip(min_perms, spk_emb)]
+        perm_spk_ids = [s[list(p)] for p, s in zip(min_perms, spk_id)]
+        perm_spk_emb = [emb[list(p)] for p, emb in zip(min_perms, spk_emb)]
         loss_spk = self.global_spk_loss(perm_spk_emb, perm_spk_ids)
         # loss_spk = batch_speaker_embedding_loss(spk_emb, labels)  # TODO
         reporter.report({'loss_spk': loss_spk}, self)
