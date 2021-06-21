@@ -1,6 +1,7 @@
 # Copyright 2019 Hitachi, Ltd. (author: Yusuke Fujita)
 # Licensed under the MIT license.
 
+import os
 import numpy as np
 import chainer
 import chainer.functions as F
@@ -69,6 +70,74 @@ def batch_pit_loss(ys, ts, label_delay=0):
     n_frames = np.sum([t.shape[0] for t in ts])
     loss = loss / n_frames
     return loss, labels
+
+
+def _pit_loss_with_perm(pred, label, label_delay=0):
+    """
+    Permutation-invariant training (PIT) cross entropy loss function.
+
+    Args:
+      pred:  (T,C)-shaped pre-activation values
+      label: (T,C)-shaped labels in {0,1}
+      label_delay: if label_delay == 5:
+           pred: 0 1 2 3 4 | 5 6 ... 99 100 |
+          label: x x x x x | 0 1 ... 94  95 | 96 97 98 99 100
+          calculated area: | <------------> |
+
+    Returns:
+      min_loss: (1,)-shape mean cross entropy
+      label_perms[min_index]: permutated labels
+    """
+    # label permutations along the speaker axis
+    all_perm = [p for p in permutations(range(label.shape[-1]))]
+    label_perms = [label[..., list(p)] for p in all_perm]
+    losses = F.stack(
+        [F.sigmoid_cross_entropy(
+            pred[label_delay:, ...],
+            l[:len(l) - label_delay, ...]) for l in label_perms])
+    xp = cuda.get_array_module(losses)
+    min_loss = F.min(losses) * (len(label) - label_delay)
+    min_index = cuda.to_cpu(xp.argmin(losses.data))
+    min_perm = all_perm[min_index]
+    return min_loss, label_perms[min_index], min_perm
+
+
+# def pit_with_speaker_loss(pred, spk_embs, label, spk_ids):
+#     """Speaker embedding loss.
+
+#     Args:
+#     #   pred:  (T, C)-shaped pre-activation values
+#     #   label: (T, C)-shaped labels in {0,1}
+#         spk_embs: (C, S) spk_id, spk_emb_dim
+#         #label: (T, C), last dim permutated match min PIT loss
+#         spk_ids: (C,) spk_id correspond to the last dim of label
+#     """
+#     min_loss, label_perm, min_perm = _pit_loss_with_perm(pred, label)
+#     # permutate spk_emb and spk_ids accordingly
+#     spk_embs_perm = spk_embs[min_perm]  
+#     spk_ids = spk_ids[min_perm]  # perm global spk id accordingly
+#     return min_loss, label_perm, spk_ids
+
+
+def batch_pit_with_perm(ys, ts, label_delay=0):
+    """PIT loss over mini-batch with selected permutation.
+
+    Args:
+      ys: B-length list of predictions
+      ts: B-length list of labels
+
+    Returns:
+      loss: (1,)-shape mean cross entropy over mini-batch
+      labels: B-length list of permuted labels
+      min_perms: B-length list of permutation applied to labels
+    """
+    loss_w_labels = [_pit_loss_with_perm(y, t)
+                     for (y, t) in zip(ys, ts)]
+    losses, labels, min_perms = zip(*loss_w_labels)
+    loss = F.sum(F.stack(losses))
+    n_frames = np.sum([t.shape[0] for t in ts])
+    loss = loss / n_frames
+    return loss, labels, min_perms
 
 
 def batch_pit_loss_faster(ys, ts, label_delay=0):
@@ -151,10 +220,10 @@ def batch_pit_n_speaker_loss(ys, ts, n_speakers_list):
       loss: (1,)-shape mean cross entropy over mini-batch
       labels: B-length list of permuted labels
     """
-    max_n_speakers = ts[0].shape[1]
+    max_n_speakers = ts[0].shape[1]  # NOTE/ why?
     xp = chainer.backend.get_array_module(ys[0])
     # (B, T, C)
-    ys = F.pad_sequence(ys, padding=-1)
+    ys = F.pad_sequence(ys, padding=-1)  # NOTE should be stack rather than pad
 
     losses = []
     for shift in range(max_n_speakers):
@@ -444,6 +513,211 @@ class TransformerDiarization(EENDModel):
         reporter.report({'loss': loss}, self)
         report_diarization_error(ys, labels, self)
         return loss
+
+    def save_attention_weight(self, ofile, batch_index=0):
+        att_weights = []
+        for l in range(self.enc.n_layers):
+            att_layer = getattr(self.enc, f'self_att_{l}')
+            # att.shape is (B, h, T, T); pick the first sample in batch
+            att_w = att_layer.att[batch_index, ...]
+            att_w.to_cpu()
+            att_weights.append(att_w.data)
+        # save as (n_layers, h, T, T)-shaped arryay
+        np.save(ofile, np.array(att_weights))
+
+class GlobalSpeakerEmbeddingsLoss(chainer.Chain):
+    """Speaker embedding loss describe in EEND-vector clustering."""
+
+    def __init__(self, in_size, out_size, initialW=None):
+        super().__init__()
+        with self.init_scope():
+            if initialW is None:
+                initialW = chainer.initializers.normal.Normal(1.0)
+            self.emb = L.EmbedID(in_size, out_size)
+            self.alpha = chainer.variable.Parameter(initialW, (1, 1))
+            self.beta = chainer.variable.Parameter(initialW, (1, 1))
+        self._M = in_size
+
+    def forward(self, spk_embs, spk_ids):
+        """Compute distance between x and all word embedding in emb.
+
+        This should calculate \alpha * norm(E - x, 2) + \beta.
+
+        Args:
+            spk_embs (List[np.ndarray]): list in shape (n_speakers, n_speaker_units)
+            spk_ids (List[np.ndarray]): global speaker index in shape (n_speakers)
+            * out_size == n_speaker_units
+
+        Returns:
+            ~chainer.Variable: Batch of embeddings distances.
+
+        """
+        xp = chainer.backend.get_array_module(spk_embs[0])
+        res = []
+        # all_emb: (_M, out_size)
+        all_emb = self.emb(xp.arange(self._M))
+        for spk_emb, spk_id in zip(spk_embs, spk_ids):
+            # # cur_emb (n_speakers, out_size): embedding correspond to given global spk_id
+            # cur_emb = self.emb(spk_id)
+            # # FIXME variance normalize?
+            # # distances (n_speakers): l2 distance between two emb matrix among all speakers
+            # distances = self.alpha * F.batch_l2_norm_squared(cur_emb - spk_emb) + self.beta
+
+            # BATCH
+            n_spks = len(spk_id)
+            # spk_all_emb: (M, E) -> (1, M, E) -> (C, M, E)
+            spk_all_emb = F.repeat(F.expand_dims(all_emb, axis=0), n_spks, axis=0)
+            # _spk_emb: (C, 1, E)
+            _spk_emb = F.expand_dims(spk_emb, axis=1)
+            # distances: norm((C, M, E) - (C, 1, E)) -> (C, M, E) -> (C*M, E) -> (C, M)
+            distances = spk_all_emb - _spk_emb
+            _C, _M, _E = distances.shape
+            distances = F.reshape(distances, (-1, _E))
+            distances = self.alpha * F.batch_l2_norm_squared(distances) + self.beta
+            distances = F.reshape(distances, (_C, _M))
+            # nll_dist (C, M): softmax along axis M
+            nll_dist = -F.log_softmax(-distances, axis=1)
+            # loss_spk (C): working spk according to spk_id
+            loss_spk = F.select_item(nll_dist, spk_id)
+            # loss_spk (scalar): reduce loss by mean
+            loss_spk = F.mean(loss_spk)
+            res.append(loss_spk)
+        res = F.mean(xp.array(res))
+        return res
+
+
+class TransformerVectorDiarization(EENDModel):
+
+    def __init__(
+        self,
+        n_speakers,
+        in_size,
+        n_units,
+        n_heads,
+        n_layers,
+        dropout,
+        n_speaker_units,
+        n_global_spks,
+        speaker_loss_ratio=0.1,
+    ):
+        """ Self-attention-based diarization model.
+
+        Args:
+          n_speakers (int): Number of speakers in recording
+          in_size (int): Dimension of input feature vector
+          n_units (int): Number of units in a self-attention block
+          n_heads (int): Number of attention heads
+          n_layers (int): Number of transformer-encoder layers
+          dropout (float): dropout ratio
+          n_speaker_units (int): Dimension of speaker embeddings
+          n_global_spks (int): Number of speakers in training (M)
+          speaker_loss_ratio (float): ratio of speaker embeding loss
+        """
+        super(TransformerVectorDiarization, self).__init__()
+        with self.init_scope():
+            self.enc = TransformerEncoder(
+                in_size, n_layers, n_units, h=n_heads)
+            self.linear = L.Linear(n_units, n_speakers)
+            self.spk_linear = L.Linear(n_units, n_speaker_units)
+            self.global_spk_loss = GlobalSpeakerEmbeddingsLoss(n_global_spks, n_speaker_units)
+        self.speaker_loss_ratio = speaker_loss_ratio
+
+    def forward(self, xs, activation=None):
+        """Forward graph computation.
+
+        Args:
+            xs (List[np.ndarray]): list of Y shape in (n_frames_ss, D)
+
+        Returns:
+            ys (List[np.ndarray]): list of shape in (n_frames_ss, n_speakers)
+            spk_emb (List[np.ndarray]): list of shape in (n_speakers, n_speaker_units)
+        """
+        ilens = [x.shape[0] for x in xs]
+        # xs: (B, T, F)
+        xs = F.pad_sequence(xs, padding=-1)
+        pad_shape = xs.shape
+        # emb: (B*T, E)
+        emb = self.enc(xs)
+        # ys: (B*T, C)
+        ys = self.linear(emb)
+        if activation:
+            ys = activation(ys)
+        # TODO: can optimize this by masking: using F.where
+        # ys: [(T, C), ...]
+        ys = F.separate(ys.reshape(pad_shape[0], pad_shape[1], -1), axis=0)
+        # retrieve non-padding part: ys [(T_i, C), ...] T_i vary
+        ys = [F.get_item(y, slice(0, ilen)) for y, ilen in zip(ys, ilens)]
+        # TODO extract speaker emb
+        # spk_emb: (B*T, S) S: speaker embedding size
+        spk_emb = self.spk_linear(emb)  # correspond to (1)
+        # spk_emb: (B, T, S)
+        spk_emb = spk_emb.reshape(pad_shape[0], pad_shape[1], -1)
+        # spk_emb of each frame -> global spk_emb over all frame by weighted sum
+        # F.swapaxes(ys, axis1=1, axis2=2)
+        # spk_emb: (B, T, S) --> [(T, S)]
+        spk_emb = F.separate(spk_emb, axis=0)
+        # spk_emb: [(T, S) --> (T_i, S)]
+        spk_emb = [F.get_item(_z, slice(0, ilen)) for _z, ilen in zip(spk_emb, ilens)]
+        # FIXME(optimize) ys here should always apply F.sigmoid
+        # _yt: [(T_i, C)] T_i vary
+        _yt = ys
+        if not activation:
+            _yt = [F.sigmoid(_y) for _y in _yt]
+        # spk_emb: [(T_i, C).T X (T_i, S)] --> [(C, S)]
+        spk_emb = [F.matmul(_y, _z, transa=True) for _z, _y in zip(spk_emb, _yt)]  # correspond to (2)
+        spk_emb = [F.normalize(_z, axis=1) for _z in spk_emb]  # correspond to (3)
+        return ys, spk_emb
+
+    def estimate_sequential(self, hx, xs, **kwargs):
+        ys, spk_emb = self.forward(xs, activation=F.sigmoid)
+        # TODO: clustering... maybe latter in infer.py
+        return None, ys
+
+    def __call__(self, xs, ts, spk_id):
+        """Method to compute loss.
+
+        Args:
+            xs (List[np.ndarray]): list of Y shape in (n_frames_ss, D)
+            ts (List[np.ndarray]): list of T shape in (n_frames_ss, n_speakers)
+            spk_id (List[np.ndarray]): list of spk_id shape in (n_speakers,)
+        """
+        ys, spk_emb = self.forward(xs)
+        # loss, labels = batch_pit_loss_faster(ys, ts)
+        n_speakers = [t.shape[1] for t in ts]
+
+        # PIT loss
+        loss, labels, min_perms = batch_pit_with_perm(ys, ts) #batch_pit_n_speaker_loss(ys, ts, n_speakers)
+        reporter.report({'loss_pit': loss}, self)
+        report_diarization_error(ys, labels, self)
+
+        # TODO speaker embedding loss
+        # permute reference speaker id as min PIT loss
+        perm_spk_ids = [s[p] for p, s in zip(min_perms, spk_id)]
+        perm_spk_emb = [emb[p] for p, emb in zip(min_perms, spk_emb)]
+        loss_spk = self.global_spk_loss(perm_spk_emb, perm_spk_ids)
+        # loss_spk = batch_speaker_embedding_loss(spk_emb, labels)  # TODO
+        reporter.report({'loss_spk': loss_spk}, self)
+
+        # Multi-objective loss: equation 4
+        loss = (1 - self.speaker_loss_ratio) * loss + self.speaker_loss_ratio * loss_spk  # noqa: E501
+        reporter.report({'loss': loss}, self)
+        return loss
+
+    # def inference(
+    #     self,
+    #     Y,
+    #     recid,
+    #     gpu,
+    #     chunk_size,
+    #     out_dir,
+    #     save_attention_weight,
+    #     num_speakers,
+    #     attractor_threshold,
+    #     shuffle,
+    # ):
+    #     """Inference pipe for EEND-vector models."""
+    #     # TODO
+    #     return out_chunks
 
     def save_attention_weight(self, ofile, batch_index=0):
         att_weights = []

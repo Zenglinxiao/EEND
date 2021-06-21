@@ -73,6 +73,11 @@ attractor_args.add_argument('--attractor-loss-ratio', default=1.0, type=float,
                             help='weighting parameter')
 attractor_args.add_argument('--attractor-encoder-dropout', default=0.1, type=float)
 attractor_args.add_argument('--attractor-decoder-dropout', default=0.1, type=float)
+
+vector_args = parser.add_argument_group('EEND-vector')
+vector_args.add_argument('--speaker-embs-size', default=256, type=int)
+vector_args.add_argument('--speaker-loss-ratio', default=0.01, type=float)
+
 args = parser.parse_args()
 
 system_info.print_system_info()

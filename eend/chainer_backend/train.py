@@ -13,6 +13,7 @@ from chainer import training
 from chainer.training import extensions
 from eend.chainer_backend.models import BLSTMDiarization
 from eend.chainer_backend.models import TransformerDiarization, TransformerEDADiarization
+from eend.chainer_backend.models import TransformerVectorDiarization
 from eend.chainer_backend.transformer import NoamScheduler
 from eend.chainer_backend.updater import GradientAccumulationUpdater
 from eend.chainer_backend.diarization_dataset import KaldiDiarizationDataset
@@ -29,6 +30,19 @@ def _convert(batch, device):
     return {'xs': to_device_batch([x for x, _ in batch]),
             'ts': to_device_batch([t for _, t in batch])}
 
+@chainer.dataset.converter()
+def _convert_with_spk(batch, device):
+    def to_device_batch(batch):
+        if device is None:
+            return batch
+        batch_dst = [device.send(x) for x in batch]
+        return batch_dst
+    return {
+        'xs': to_device_batch([x for x, _, _ in batch]),
+        'ts': to_device_batch([t for _, t, _ in batch]),
+        'spk_id': to_device_batch([s for _, _, s in batch]),
+    }
+
 
 def train(args):
     """ Training model with chainer backend.
@@ -38,6 +52,13 @@ def train(args):
     np.random.seed(args.seed)
     os.environ['CHAINER_SEED'] = str(args.seed)
     chainer.global_config.cudnn_deterministic = True
+
+    if args.model_type == 'TransformerSpkVector':
+        use_global_speaker_id = True
+        fn_convert = _convert_with_spk
+    else:
+        use_global_speaker_id = False
+        fn_convert = _convert
 
     train_set = KaldiDiarizationDataset(
         args.train_data_dir,
@@ -52,6 +73,7 @@ def train(args):
         label_delay=args.label_delay,
         n_speakers=args.num_speakers,
         shuffle=args.shuffle,
+        use_global_speaker_id=use_global_speaker_id,
     )
     dev_set = KaldiDiarizationDataset(
         args.valid_data_dir,
@@ -66,6 +88,7 @@ def train(args):
         label_delay=args.label_delay,
         n_speakers=args.num_speakers,
         shuffle=args.shuffle,
+        use_global_speaker_id=use_global_speaker_id,
     )
 
     # Prepare model
@@ -104,6 +127,22 @@ def train(args):
                 n_layers=args.transformer_encoder_n_layers,
                 dropout=args.transformer_encoder_dropout
             )
+    elif args.model_type == 'TransformerSpkVector':
+        assert args.num_speakers is not None
+        glb_spk = train_set.data.global_speakers
+        num_global_spks = len(glb_spk)
+        print(f"Found {num_global_spks} speaker in training set.")
+        model = TransformerVectorDiarization(
+            args.num_speakers,
+            Y.shape[1],
+            n_units=args.hidden_size,
+            n_heads=args.transformer_encoder_n_heads,
+            n_layers=args.transformer_encoder_n_layers,
+            dropout=args.transformer_encoder_dropout,
+            n_speaker_units=args.speaker_embs_size,
+            n_global_spks=num_global_spks,
+            speaker_loss_ratio=args.speaker_loss_ratio,
+        )
     else:
         raise ValueError('Possible model_type are "Transformer" and "BLSTM"')
 
@@ -153,10 +192,10 @@ def train(args):
 
     if args.gradient_accumulation_steps > 1:
         updater = GradientAccumulationUpdater(
-            train_iter, optimizer, converter=_convert, device=gpuid)
+            train_iter, optimizer, converter=fn_convert, device=gpuid)
     else:
         updater = training.StandardUpdater(
-            train_iter, optimizer, converter=_convert, device=gpuid)
+            train_iter, optimizer, converter=fn_convert, device=gpuid)
 
     trainer = training.Trainer(
         updater,
