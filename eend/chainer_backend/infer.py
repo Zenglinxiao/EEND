@@ -82,6 +82,7 @@ def infer(args):
             n_speaker_units=args.speaker_embs_size,
             n_global_spks=1, # num_global_spks,
             speaker_loss_ratio=0.0, #args.speaker_loss_ratio,
+            speaker_global_ln=args.speaker_global_ln,
         )
     else:
         raise ValueError('Unknown model type.')

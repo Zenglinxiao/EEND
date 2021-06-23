@@ -59,6 +59,8 @@ attractor_args.add_argument('--attractor-threshold', default=0.5, type=float)
 
 vector_args = parser.add_argument_group('EEND-vector')
 vector_args.add_argument('--speaker-embs-size', default=256, type=int)
+vector_args.add_argument('--speaker-global-ln', action='store_true',
+                         help='Use layer norm instead of L2 norm on global embeddings.')
 args = parser.parse_args()
 
 system_info.print_system_info()

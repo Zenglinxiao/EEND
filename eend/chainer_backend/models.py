@@ -533,7 +533,7 @@ class TransformerDiarization(EENDModel):
 class GlobalSpeakerEmbeddingsLoss(chainer.Chain):
     """Speaker embedding loss describe in EEND-vector clustering."""
 
-    def __init__(self, in_size, out_size, initialW=None):
+    def __init__(self, in_size, out_size, initialW=None, use_layer_norm=False):
         super().__init__()
         with self.init_scope():
             if initialW is None:
@@ -545,8 +545,10 @@ class GlobalSpeakerEmbeddingsLoss(chainer.Chain):
             self.beta = chainer.variable.Parameter(
                 chainer.initializers.Zero(), (1, 1)
             )
-            self.layer_norm = L.LayerNormalization(out_size)
+            if use_layer_norm:
+                self.layer_norm = L.LayerNormalization(out_size)
         self._M = in_size
+        self.use_layer_norm = use_layer_norm
 
     def forward(self, spk_embs, spk_ids):
         """Compute distance between x and all word embedding in emb.
@@ -566,7 +568,10 @@ class GlobalSpeakerEmbeddingsLoss(chainer.Chain):
         res = chainer.Variable(xp.zeros((1,), dtype=spk_embs[0].dtype))
         # all_emb: (_M, out_size)
         all_emb = self.emb(xp.arange(self._M))
-        all_emb = self.layer_norm(all_emb)
+        if self.use_layer_norm:
+            all_emb = self.layer_norm(all_emb)
+        else:
+            all_emb = F.normalize(all_emb, axis=1)
         for spk_emb, spk_id in zip(spk_embs, spk_ids):
             # # cur_emb (n_speakers, out_size): embedding correspond to given global spk_id
             # cur_emb = self.emb(spk_id)
@@ -610,6 +615,7 @@ class TransformerVectorDiarization(EENDModel):
         n_speaker_units,
         n_global_spks,
         speaker_loss_ratio=0.1,
+        speaker_global_ln=False,
     ):
         """ Self-attention-based diarization model.
 
@@ -631,7 +637,10 @@ class TransformerVectorDiarization(EENDModel):
             self.linear = L.Linear(n_units, n_speakers)
             self.spk_linear = L.Linear(n_units, n_speaker_units)
             # self.layer_norm = L.LayerNormalization(n_speaker_units)
-            self.global_spk_loss = GlobalSpeakerEmbeddingsLoss(n_global_spks, n_speaker_units)
+            self.global_spk_loss = GlobalSpeakerEmbeddingsLoss(
+                n_global_spks, n_speaker_units,
+                use_layer_norm=speaker_global_ln,
+            )
         self.speaker_loss_ratio = speaker_loss_ratio
 
     def forward(self, xs, activation=None):

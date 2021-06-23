@@ -142,6 +142,7 @@ def train(args):
             n_speaker_units=args.speaker_embs_size,
             n_global_spks=num_global_spks,
             speaker_loss_ratio=args.speaker_loss_ratio,
+            speaker_global_ln=args.speaker_global_ln,
         )
     else:
         raise ValueError('Possible model_type are "Transformer" and "BLSTM"')

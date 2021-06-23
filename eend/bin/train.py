@@ -77,6 +77,8 @@ attractor_args.add_argument('--attractor-decoder-dropout', default=0.1, type=flo
 vector_args = parser.add_argument_group('EEND-vector')
 vector_args.add_argument('--speaker-embs-size', default=256, type=int)
 vector_args.add_argument('--speaker-loss-ratio', default=0.01, type=float)
+vector_args.add_argument('--speaker-global-ln', action='store_true',
+                         help='Use layer norm instead of L2 norm on global embeddings.')
 
 args = parser.parse_args()
 
