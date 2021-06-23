@@ -630,7 +630,7 @@ class TransformerVectorDiarization(EENDModel):
                 in_size, n_layers, n_units, h=n_heads)
             self.linear = L.Linear(n_units, n_speakers)
             self.spk_linear = L.Linear(n_units, n_speaker_units)
-            self.layer_norm = L.LayerNormalization(n_speaker_units)
+            # self.layer_norm = L.LayerNormalization(n_speaker_units)
             self.global_spk_loss = GlobalSpeakerEmbeddingsLoss(n_global_spks, n_speaker_units)
         self.speaker_loss_ratio = speaker_loss_ratio
 
@@ -662,7 +662,7 @@ class TransformerVectorDiarization(EENDModel):
         # TODO extract speaker emb
         # spk_emb: (B*T, S) S: speaker embedding size
         spk_emb = self.spk_linear(emb)  # correspond to (1)
-        spk_emb = self.layer_norm(spk_emb)
+        # spk_emb = self.layer_norm(spk_emb)
         # spk_emb: (B, T, S)
         spk_emb = spk_emb.reshape(pad_shape[0], pad_shape[1], -1)
         # spk_emb of each frame -> global spk_emb over all frame by weighted sum
