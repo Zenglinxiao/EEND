@@ -12,6 +12,7 @@ from chainer import serializers
 from scipy.ndimage import shift
 from eend.chainer_backend.models import BLSTMDiarization
 from eend.chainer_backend.models import TransformerDiarization, TransformerEDADiarization
+from eend.chainer_backend.models import TransformerVectorDiarization
 from eend.chainer_backend.utils import use_single_gpu
 from eend import feature
 from eend import kaldi_data
@@ -66,6 +67,22 @@ def infer(args):
                 n_layers=args.transformer_encoder_n_layers,
                 dropout=0
             )
+    elif args.model_type == 'TransformerSpkVector':
+        inference_kwargs["num_speakers"] = args.num_speakers
+        # glb_spk = train_set.data.global_speakers_with_silent
+        # num_global_spks = len(glb_spk)
+        # print(f"Found {num_global_spks} speaker in training set.")
+        model = TransformerVectorDiarization(
+            args.num_speakers,
+            in_size,
+            n_units=args.hidden_size,
+            n_heads=args.transformer_encoder_n_heads,
+            n_layers=args.transformer_encoder_n_layers,
+            dropout=0,
+            n_speaker_units=args.speaker_embs_size,
+            n_global_spks=1, # num_global_spks,
+            speaker_loss_ratio=0.0, #args.speaker_loss_ratio,
+        )
     else:
         raise ValueError('Unknown model type.')
 

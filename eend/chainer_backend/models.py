@@ -431,9 +431,9 @@ class EENDModel(chainer.Chain):
         chunk_size,
         out_dir,
         save_attention_weight,
-        num_speakers,
-        attractor_threshold,
-        shuffle,
+        num_speakers=4,
+        attractor_threshold=0.5,
+        shuffle=False,
     ):
         """Default inference pipe for EEND models."""
         out_chunks = []
@@ -540,6 +540,7 @@ class GlobalSpeakerEmbeddingsLoss(chainer.Chain):
             self.beta = chainer.variable.Parameter(
                 chainer.initializers.Zero(), (1, 1)
             )
+            self.layer_norm = L.LayerNormalization(out_size)
         self._M = in_size
 
     def forward(self, spk_embs, spk_ids):
@@ -560,6 +561,7 @@ class GlobalSpeakerEmbeddingsLoss(chainer.Chain):
         res = chainer.Variable(xp.zeros((1,), dtype=spk_embs[0].dtype))
         # all_emb: (_M, out_size)
         all_emb = self.emb(xp.arange(self._M))
+        all_emb = self.layer_norm(all_emb)
         for spk_emb, spk_id in zip(spk_embs, spk_ids):
             # # cur_emb (n_speakers, out_size): embedding correspond to given global spk_id
             # cur_emb = self.emb(spk_id)
