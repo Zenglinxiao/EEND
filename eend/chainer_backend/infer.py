@@ -86,7 +86,8 @@ def infer(args):
     else:
         raise ValueError('Unknown model type.')
 
-    serializers.load_npz(args.model_file, model)
+    model.load_npz(args.model_file, eval=True)
+    # serializers.load_npz(args.model_file, model)
 
     if args.gpu >= 0:
         gpuid = use_single_gpu()
