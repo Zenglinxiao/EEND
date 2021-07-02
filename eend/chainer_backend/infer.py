@@ -6,10 +6,10 @@
 import os
 import h5py
 import numpy as np
-import chainer
-from chainer import Variable
-from chainer import serializers
-from scipy.ndimage import shift
+# import chainer
+# from chainer import Variable
+# from chainer import serializers
+# from scipy.ndimage import shift
 from eend.chainer_backend.models import BLSTMDiarization
 from eend.chainer_backend.models import TransformerDiarization, TransformerEDADiarization
 from eend.chainer_backend.models import TransformerVectorDiarization
@@ -84,6 +84,7 @@ def infer(args):
             speaker_loss_ratio=0.0, #args.speaker_loss_ratio,
             speaker_global_ln=args.speaker_global_ln,
         )
+        inference_kwargs["num_clusters"] = args.num_clusters
     else:
         raise ValueError('Unknown model type.')
 
@@ -102,21 +103,12 @@ def infer(args):
         Y = feature.transform(Y, transform_type=args.input_transform)
         Y = feature.splice(Y, context_size=args.context_size)
         Y = Y[::args.subsampling]
-        out_chunks = model.inference(
+        outdata = model.inference(
             Y,
             recid=recid,
             **inference_kwargs
         )
         outfname = recid + '.h5'
         outpath = os.path.join(args.out_dir, outfname)
-        if hasattr(model, 'label_delay'):
-            outdata = shift(np.vstack(out_chunks), (-model.label_delay, 0))
-        else:
-            max_n_speakers = max([o.shape[1] for o in out_chunks])
-            # out_chunks: padding [(T, speaker_active)]  --> [(T, max_n_speakers)]
-            # FIXME: where inter-chunk label permutation comes
-            out_chunks = [np.insert(o, o.shape[1], np.zeros((max_n_speakers - o.shape[1], o.shape[0])), axis=1) for o in out_chunks]
-            # outdata: --vstack-> (B, T, max_n_speakers)
-            outdata = np.vstack(out_chunks)
         with h5py.File(outpath, 'w') as wf:
             wf.create_dataset('T_hat', data=outdata)

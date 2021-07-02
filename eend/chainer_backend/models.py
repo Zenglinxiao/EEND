@@ -7,6 +7,7 @@ import chainer
 import chainer.functions as F
 import chainer.links as L
 from itertools import permutations
+from scipy.ndimage import shift as array_shift
 from chainer import cuda
 from chainer import reporter
 from chainer import configuration
@@ -457,7 +458,16 @@ class EENDModel(chainer.Chain):
                     att_fname = f"{recid}_{start}_{end}.att.npy"
                     att_path = os.path.join(out_dir, att_fname)
                     self.save_attention_weight(att_path)
-        return out_chunks
+        if hasattr(self, 'label_delay'):
+            outdata = array_shift(np.vstack(out_chunks), (-self.label_delay, 0))
+        else:
+            max_n_speakers = max([o.shape[1] for o in out_chunks])
+            # out_chunks: padding [(T, speaker_active)]  --> [(T, max_n_speakers)]
+            # FIXME: where inter-chunk label permutation comes
+            out_chunks = [np.insert(o, o.shape[1], np.zeros((max_n_speakers - o.shape[1], o.shape[0])), axis=1) for o in out_chunks]
+            # outdata: --vstack-> (B, T, max_n_speakers)
+            outdata = np.vstack(out_chunks)
+        return outdata
 
     def load_npz(self, npz_file, **kwargs):
         serializers.load_npz(npz_file, self)
@@ -691,9 +701,16 @@ class TransformerVectorDiarization(EENDModel):
         return ys, spk_emb
 
     def estimate_sequential(self, hx, xs, **kwargs):
+        """Return estimate prediction with speaker embeddings.
+
+        Returns:
+            * None: placeholder
+            * ys (List[np.ndarray]): list of shape in (n_frames_ss, n_speakers)
+            * spk_emb (List[np.ndarray]): list of shape in (n_speakers, n_speaker_units)
+        """
         ys, spk_emb = self.forward(xs, activation=F.sigmoid)
         # TODO: clustering... maybe latter in infer.py
-        return None, ys
+        return None, ys, spk_emb
 
     def __call__(self, xs, ts, spk_id):
         """Method to compute loss.
@@ -725,21 +742,77 @@ class TransformerVectorDiarization(EENDModel):
         reporter.report({'loss': loss}, self)
         return loss
 
-    # def inference(
-    #     self,
-    #     Y,
-    #     recid,
-    #     gpu,
-    #     chunk_size,
-    #     out_dir,
-    #     save_attention_weight,
-    #     num_speakers,
-    #     attractor_threshold,
-    #     shuffle,
-    # ):
-    #     """Inference pipe for EEND-vector models."""
-    #     # TODO
-    #     return out_chunks
+    def inference(
+        self,
+        Y,
+        recid,
+        gpu,
+        chunk_size,
+        out_dir,
+        save_attention_weight,
+        save_speaker_embs=True,
+        num_clusters=-1,
+        **kwargs,
+    ):
+        """Inference pipe for EEND-vector models."""
+        out_chunks, out_spk_embs = [], []
+        with chainer.no_backprop_mode(), chainer.using_config('train', False):
+            hs = None
+            for start, end in self._gen_chunk_indices(len(Y), chunk_size):  # chunking record
+                Y_chunked = chainer.Variable(Y[start:end])
+                if gpu >= 0:
+                    Y_chunked.to_gpu(gpu)
+                hs, ys, spk_emb = self.estimate_sequential(
+                    hs, [Y_chunked],
+                )
+                if gpu >= 0:
+                    ys[0].to_cpu()
+                    spk_emb[0].to_cpu()
+                out_chunks.append(ys[0].data)
+                out_spk_embs.append(spk_emb[0].data)
+                if save_attention_weight == 1:
+                    att_fname = f"{recid}_{start}_{end}.att.npy"
+                    att_path = os.path.join(out_dir, att_fname)
+                    self.save_attention_weight(att_path)
+        if hasattr(self, 'label_delay'):
+            outdata = array_shift(np.vstack(out_chunks), (-self.label_delay, 0))
+            raise NotImplementedError("inference with label_delay is not implemented!")
+        elif num_clusters > 0:
+            max_n_speakers = max([o.shape[1] for o in out_chunks])
+            if max_n_speakers > num_clusters:
+                raise RuntimeError("num_clusters is set too low")
+                max_n_speakers = num_clusters
+            # TODO: [silent_speaker_detect(ys) for ys in out_chunks]
+            from eend.clusters import contraint_kmeans
+            cluster_ids, cluster_centers = contraint_kmeans(
+                out_spk_embs, n_clusters=num_clusters
+            )
+            # cluster_ids: List[List[int]]
+            # init zeros with num_clusters, then select fill wrt cluster_ids
+            _out_chunks = [np.zeros((o.shape[0], num_clusters), dtype=o.dtype) for o in out_chunks]
+            for i in range(len(out_chunks)):
+                _chunk_cluster_ids = cluster_ids[i]  # shape: (C)
+                _out_chunks[i][:, _chunk_cluster_ids] = out_chunks[i]  # fill (T, C*) with (T, C)
+            # stack [(T, C*)] --> (B*T, C*)
+            outdata = np.vstack(_out_chunks)
+        else:
+            max_n_speakers = max([o.shape[1] for o in out_chunks])
+            # out_chunks: padding [(T, speaker_active)]  --> [(T, max_n_speakers)]
+            # FIXME: where inter-chunk label permutation comes
+            out_chunks = [np.insert(o, o.shape[1], np.zeros((max_n_speakers - o.shape[1], o.shape[0])), axis=1) for o in out_chunks]
+            # outdata: --vstack-> (B*T, max_n_speakers)
+            outdata = np.vstack(out_chunks)
+            # FIXME out_spk_embs list of (C, S), can be different C across chunk for EDA
+            out_spks = np.vstack(out_spk_embs)
+            chunk_sizes = np.array([o.shape[0] for o in out_chunks])
+            if save_speaker_embs:
+                spk_path = os.path.join(out_dir, f"{recid}.spk.h5")
+                import h5py
+                with h5py.File(spk_path, 'w') as wf:
+                    wf.create_dataset('T_hat', data=outdata)
+                    wf.create_dataset('out_spks', data=out_spks)
+                    wf.create_dataset('chunk_sizes', data=chunk_sizes)
+        return outdata
 
     def save_attention_weight(self, ofile, batch_index=0):
         att_weights = []

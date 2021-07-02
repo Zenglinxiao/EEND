@@ -61,6 +61,7 @@ vector_args = parser.add_argument_group('EEND-vector')
 vector_args.add_argument('--speaker-embs-size', default=256, type=int)
 vector_args.add_argument('--speaker-global-ln', action='store_true',
                          help='Use layer norm instead of L2 norm on global embeddings.')
+vector_args.add_argument('--num-clusters', default=-1, type=int)
 args = parser.parse_args()
 
 system_info.print_system_info()
