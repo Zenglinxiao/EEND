@@ -31,7 +31,6 @@ def batch_silence_detect(array_list, threshold=0.05):
     """
     silence_ids = []
     for X in array_list:
-        silence_set = set()
         mean_logits = np.mean(X, axis=0) # shape: (speakers)
         silence_set = {i for i, logit in enumerate(mean_logits) if logit < threshold}
         silence_ids.append(silence_set)
@@ -51,7 +50,7 @@ def get_cannot_link_pairs(X, exclude=None):
     batch_size = len(X)
     if exclude is None:
         # init exclude list
-        exclude = [set() * batch_size]
+        exclude = [set() for _ in range(batch_size)]
     cannot_link = []
     idx = 0
     for arr, _ex_set in zip(X, exclude):
@@ -66,6 +65,22 @@ def get_cannot_link_pairs(X, exclude=None):
             cannot_link.extend(not_links)
         idx += n_spks
     return cannot_link
+
+
+def increasing_ids(clusters, centers):
+    """Remap clusters to be increasing order, and adjust centers accordingly.
+
+    This should change [1, 2, 0, 1, 1] -> [0, 1, 2, 0, 0].
+    """
+    id_map = {}
+    id_real = 0
+    for value in clusters:
+        if value not in id_map:
+            id_map[value] = id_real
+            id_real += 1  
+    new_clusters = [id_map[v] for v in clusters]
+    new_centers = [centers[id_map[i]] for i in range(len(centers))]
+    return new_clusters, new_centers
 
 
 def contraint_kmeans(X, n_clusters, Y=None, th_silent=0.05):
@@ -97,7 +112,8 @@ def contraint_kmeans(X, n_clusters, Y=None, th_silent=0.05):
         max_iter=300,
         tol=1e-4,
     )
-    # TODO: remap cluster index in ascending order.
+    # remap cluster index in ascending order.
+    clusters_, centers_ = increasing_ids(clusters_, centers_)
     # reshape cluster_ to that of X
     cluster_ids = []
     k = 0
