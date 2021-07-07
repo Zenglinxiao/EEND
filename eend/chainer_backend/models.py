@@ -752,6 +752,7 @@ class TransformerVectorDiarization(EENDModel):
         save_attention_weight,
         save_speaker_embs=True,
         num_clusters=-1,
+        silent_threshold=0.0,
         **kwargs,
     ):
         """Inference pipe for EEND-vector models."""
@@ -785,7 +786,8 @@ class TransformerVectorDiarization(EENDModel):
             # TODO: [silent_speaker_detect(ys) for ys in out_chunks]
             from eend.clusters import contraint_kmeans
             cluster_ids, cluster_centers = contraint_kmeans(
-                out_spk_embs, n_clusters=num_clusters, Y=out_chunks
+                out_spk_embs, n_clusters=num_clusters,
+                Y=out_chunks, th_silent=silent_threshold,
             )
             # cluster_ids: List[List[int]]
             # init zeros with num_clusters, then select fill wrt cluster_ids

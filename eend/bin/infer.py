@@ -62,6 +62,8 @@ vector_args.add_argument('--speaker-embs-size', default=256, type=int)
 vector_args.add_argument('--speaker-global-ln', action='store_true',
                          help='Use layer norm instead of L2 norm on global embeddings.')
 vector_args.add_argument('--num-clusters', default=-1, type=int)
+vector_args.add_argument('--silent-threshold', default=0.0, type=float,
+                         help='set value > 0 to activate silent speaker detection when clustering (0.05 in paper)')
 args = parser.parse_args()
 
 system_info.print_system_info()

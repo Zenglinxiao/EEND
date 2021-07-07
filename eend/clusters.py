@@ -83,6 +83,83 @@ def increasing_ids(clusters, centers):
     return new_clusters, new_centers
 
 
+def _find_duplicate(numbers):
+    seen = set()
+    duplicate = set()
+    for x in numbers:
+        if x not in seen:
+            seen.add(x)
+        else:
+            duplicate.add(x)
+    return duplicate, seen
+
+
+def fix_duplicate(numbers, variable_pos):
+    """Fix duplicate by change those to other number in the range of [0, M].
+
+    Examples:
+        [0, 1, 2, 2, 2], {2, 4} -> [0, 1, 3, 2, 4]
+        [0, 1, 2, 2, 2], {2, 3} -> [0, 1, 3, 4, 2]
+        [0, 1, 2, 2, 2], {3, 4} -> [0, 1, 2, 3, 4]
+        [0, 1, 3, 4, 2], {2, 4} -> won't change if no duplicate
+        [0, 1, 2, 3, 2], {2, 4} -> [0, 1, 4, 3, 2]
+        [0, 1, 2, 2, 2], {1, 4} -> Not possible!
+        [1, 1], {0, 1} -> [0, 1]
+        [0, 0], {0, 1} -> [1, 0]
+        [2, 2], {1} -> [2, 0]
+        [2, 2], {0, 1} -> [0, 1]
+    """
+    duplicates, seen = _find_duplicate(numbers)
+    if len(variable_pos) > 0:
+        if len(duplicates) > 0:
+            replace_candidates = []
+            position2change = []
+            for i in range(len(numbers)):
+                if i not in seen:
+                    replace_candidates.append(i)
+                v = numbers[i]
+                if v in duplicates and i in variable_pos:
+                    position2change.append(i)
+            # if len(position2change) != len(replace_candidates):
+            #     print(f"numbers: {numbers}, variable_pos: {variable_pos}")
+            # if len(position2change) < len(replace_candidates):
+            #     import pdb; pdb.set_trace()
+            #     raise ValueError("input argument not valid!")
+            for pos, candidate in zip(position2change, replace_candidates):
+                numbers[pos] = candidate       
+    else:
+        if len(duplicates) != 0:
+            raise ValueError("Argument not meet function require!")
+    return numbers
+
+
+def silence_fix(clusters, lengths, silences):
+    """Resolve duplicated id for clusters.
+
+    Args:
+        clusters (List[int]): list of cluster id
+        lengths (List[int]): list of length
+        silences (List[Set[int]]): list of silent relative id set
+
+    Returns:
+        cluster_ids (List[List[int]]): list of list int
+
+    Examples:
+        Given [0, 1, 1, 1] lengths [2, 2] silence [{}, {1}]
+        -> [0, 1, 1, 0]
+    """
+    cluster_ids = [i for i in clusters]
+    cursor = 0  # number of element visited
+    for chunk_i, silence in enumerate(silences):
+        if len(silence) > 0:
+            chunk2fix = cluster_ids[cursor: cursor+lengths[chunk_i]]
+            # elements in chunk2fix should be unique after fix
+            fixed = fix_duplicate(chunk2fix, variable_pos=silence)
+            cluster_ids[cursor: cursor+lengths[chunk_i]] = fixed
+        cursor += lengths[chunk_i]
+    return cluster_ids
+
+
 def contraint_kmeans(X, n_clusters, Y=None, th_silent=0.05):
     """Do contraint KMeans(COP-KMeans) on X.
 
@@ -101,7 +178,9 @@ def contraint_kmeans(X, n_clusters, Y=None, th_silent=0.05):
         clusters (List[int]): list of cluster id correspond to each embedding
         centers (List[np.ndarray]): list of embeddings of each cluster center
     """
-    silences = batch_silence_detect(Y, threshold=th_silent) if Y is not None else None
+    silences = None
+    if th_silent > 0 and Y is not None:
+        silences = batch_silence_detect(Y, threshold=th_silent)
     cannot_link = get_cannot_link_pairs(X, exclude=silences)
     padded_X = np.vstack(X)  # [(C, FS)] -> (sum(C), FS)
     clusters_, centers_ = cop_kmeans(
@@ -114,6 +193,11 @@ def contraint_kmeans(X, n_clusters, Y=None, th_silent=0.05):
     )
     # remap cluster index in ascending order.
     clusters_, centers_ = increasing_ids(clusters_, centers_)
+    # silences may result duplicate assign of cluster id due to removal of
+    # can not link for these pair, thus need to resolve them
+    if silences is not None:
+        _lengths = [len(arr) for arr in X]  # first dims of the array list
+        clusters_ = silence_fix(clusters_, _lengths, silences)
     # reshape cluster_ to that of X
     cluster_ids = []
     k = 0

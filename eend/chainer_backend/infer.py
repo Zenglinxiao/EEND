@@ -85,6 +85,7 @@ def infer(args):
             speaker_global_ln=args.speaker_global_ln,
         )
         inference_kwargs["num_clusters"] = args.num_clusters
+        inference_kwargs["silent_threshold"] = args.silent_threshold
     else:
         raise ValueError('Unknown model type.')
 
