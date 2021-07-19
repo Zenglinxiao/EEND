@@ -183,14 +183,19 @@ def contraint_kmeans(X, n_clusters, Y=None, th_silent=0.05):
         silences = batch_silence_detect(Y, threshold=th_silent)
     cannot_link = get_cannot_link_pairs(X, exclude=silences)
     padded_X = np.vstack(X)  # [(C, FS)] -> (sum(C), FS)
-    clusters_, centers_ = cop_kmeans(
-        padded_X,
-        k=n_clusters,
-        cl=cannot_link,  # can not link contraint
-        initialization='kmpp',
-        max_iter=300,
-        tol=1e-4,
-    )
+    try:
+        clusters_, centers_ = cop_kmeans(
+            padded_X,
+            k=n_clusters,
+            cl=cannot_link,  # can not link contraint
+            initialization='kmpp',
+            max_iter=300,
+            tol=1e-4,
+        )
+    except Exception as err:
+        print(err)
+        # import pdb; pdb.set_trace()
+        raise
     # remap cluster index in ascending order.
     clusters_, centers_ = increasing_ids(clusters_, centers_)
     # silences may result duplicate assign of cluster id due to removal of

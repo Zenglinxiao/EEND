@@ -736,7 +736,7 @@ class TransformerVectorDiarization(EENDModel):
         loss_spk = self.global_spk_loss(perm_spk_emb, perm_spk_ids)
         # loss_spk = batch_speaker_embedding_loss(spk_emb, labels)  # TODO
         reporter.report({'loss_spk': loss_spk}, self)
-
+        print(f"loss_pit {loss}, loss_spk {loss_spk}")
         # Multi-objective loss: equation 4
         loss = (1 - self.speaker_loss_ratio) * loss + self.speaker_loss_ratio * loss_spk  # noqa: E501
         reporter.report({'loss': loss}, self)
@@ -785,10 +785,15 @@ class TransformerVectorDiarization(EENDModel):
                 max_n_speakers = num_clusters
             # TODO: [silent_speaker_detect(ys) for ys in out_chunks]
             from eend.clusters import contraint_kmeans
-            cluster_ids, cluster_centers = contraint_kmeans(
-                out_spk_embs, n_clusters=num_clusters,
-                Y=out_chunks, th_silent=silent_threshold,
-            )
+            try:
+                cluster_ids, cluster_centers = contraint_kmeans(
+                    out_spk_embs, n_clusters=num_clusters,
+                    Y=out_chunks, th_silent=silent_threshold,
+                )
+            except Exception as err:
+                print(err)
+                # import pdb; pdb.set_trace()
+                raise
             # cluster_ids: List[List[int]]
             # init zeros with num_clusters, then select fill wrt cluster_ids
             _out_chunks = [np.zeros((o.shape[0], num_clusters), dtype=o.dtype) for o in out_chunks]
