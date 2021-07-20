@@ -56,18 +56,23 @@ def rechunk_data(T_hat, spk_embs, chunk_sizes):
     return chunk_T_hat, chunk_spk_embs
 
 
-def fill_within_right_cluster(T_hat, chunked_T_hat, cluster_ids):
+def fill_within_right_cluster(T_hat, chunked_T_hat, cluster_ids, n_clusters=None):
     """Get fix T_hat after clustering.
 
     Args:
         T_hat (ndarray): shape in (sum(frame), max_n_spks)
         chunked_T_hat (List[ndarray]): list of shape (n_frame, n_spks)
         cluster_ids (List[List[int]]): clusters ids conform to chunked_T_hat
+        n_clusters (int): number of clusters
 
     Returns:
         * T_hat_clustered (ndarray): shape in (sum(frame), max_n_spks)
     """
-    T_hat_clustered = np.zeros_like(T_hat)
+    if n_clusters is not None:
+        n_frames = T_hat.shape[0]
+        T_hat_clustered = np.zeros((n_frames, n_clusters), dtype=T_hat.dtype)
+    else:
+        T_hat_clustered = np.zeros_like(T_hat)
     begin_frame = 0
     for T_hat_chunk_i, cids in zip(chunked_T_hat, cluster_ids):
         _n_frame, _n_spks = T_hat_chunk_i.shape
@@ -86,6 +91,7 @@ def fill_within_right_cluster(T_hat, chunked_T_hat, cluster_ids):
                     local_T > T_compare, local_T, T_compare,
                 )
                 T_hat_clustered[begin_frame:end_frame, cid] = T_bigger
+        begin_frame = end_frame
     return T_hat_clustered
 
 
@@ -131,6 +137,7 @@ def predict(data, threshold, num_clusters, cluster_method):
                 _T_hat,
                 chunk_T_hat,
                 cluster_ids,
+                n_clusters=num_clusters,
             )
             a = np.where(T_hat > threshold, 1, 0)
     else:
