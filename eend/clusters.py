@@ -1,6 +1,7 @@
 """Utils relate to constraint clustering."""
 import numpy as np
 from cop_kmeans import cop_kmeans
+from sklearn.cluster import KMeans, AgglomerativeClustering, SpectralClustering
 
 
 def transitive_tuple(index_set):
@@ -175,7 +176,7 @@ def contraint_kmeans(X, n_clusters, Y=None, th_silent=0.05):
         th_silent (float): silent threshold to use when Y is provided.
 
     Returns:
-        clusters (List[int]): list of cluster id correspond to each embedding
+        clusters (List[List[int]]): clusters ids correspond. to each embedding
         centers (List[np.ndarray]): list of embeddings of each cluster center
     """
     silences = None
@@ -203,6 +204,57 @@ def contraint_kmeans(X, n_clusters, Y=None, th_silent=0.05):
     if silences is not None:
         _lengths = [len(arr) for arr in X]  # first dims of the array list
         clusters_ = silence_fix(clusters_, _lengths, silences)
+    # reshape cluster_ to that of X
+    cluster_ids = []
+    k = 0
+    for i in range(len(X)):
+        chunk_result = []
+        for _ in range(len(X[i])):
+            chunk_result.append(clusters_[k])
+            k += 1
+        cluster_ids.append(chunk_result)
+    assert k == len(clusters_)
+    return cluster_ids, centers_
+
+
+def regular_clustering(X, n_clusters, Y=None, th_silent=0.05, method="kmeans"):
+    """Standart KMeans from Scikit-learn.
+
+    Args:
+        X (List[np.ndarray]): shape (C, FS), clustering is done on feature space,
+        where different point along C dimension should not be in same cluster.
+        Point of same cluster can only origin from different array of the list.
+
+        Y (List[np.darray]): shape (Frames, C), tagging prediction for each chunk.
+        If provided, this will be used to fix conflit when multiple embeddings are
+        clustered into a single cluster.
+
+        th_silent (float): silent threshold to use when Y is provided.
+        method (str): clustering method to use, choose from [kmeans, ahc, sc].
+
+    Returns:
+        clusters (List[List[int]]): clusters ids correspond. to each embedding
+        centers (List[np.ndarray]): list of embeddings of each cluster center
+    """
+    padded_X = np.vstack(X)  # [(C, FS)] -> (sum(C), FS)
+    try:
+        if method == "kmeans":
+            clustered = KMeans(n_clusters=n_clusters).fit(padded_X)
+        elif method == "ahc":
+            clustered = AgglomerativeClustering(
+                n_clusters=n_clusters).fit(padded_X)
+        elif method == "sc":
+            clustered = SpectralClustering(n_clusters=n_clusters).fit(padded_X)
+        else:
+            raise NotImplementedError(f"Invalid clustering method: {method}")
+        clusters_ = clustered.labels_
+        centers_ = clustered.cluster_centers_
+    except Exception as err:
+        print(err)
+        # import pdb; pdb.set_trace()
+        raise
+    # remap cluster index in ascending order.
+    clusters_, centers_ = increasing_ids(clusters_, centers_)
     # reshape cluster_ to that of X
     cluster_ids = []
     k = 0
