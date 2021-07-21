@@ -786,7 +786,7 @@ class TransformerVectorDiarization(EENDModel):
             # TODO: [silent_speaker_detect(ys) for ys in out_chunks]
             from eend.clusters import contraint_kmeans
             try:
-                cluster_ids, cluster_centers = contraint_kmeans(
+                cluster_ids = contraint_kmeans(
                     out_spk_embs, n_clusters=num_clusters,
                     Y=out_chunks, th_silent=silent_threshold,
                 )

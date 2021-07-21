@@ -119,14 +119,14 @@ def predict(data, threshold, num_clusters, cluster_method):
             raise NotImplementedError("Currently do this in infer.py")
             # perform instance constrained clustering:
             # cluster id in same chunk suppose to be different
-            # cluster_ids, cluster_centers = contraint_kmeans(
+            # cluster_ids = contraint_kmeans(
             #     chunk_spk_embs, n_clusters=num_clusters,
             #     Y=chunk_T_hat, th_silent=silent_threshold,
             # )
         else:
             # perform unconstrained clustering (kmeans/ahc/sc):
             # may assign same cluster id for speaker in the same chunk
-            cluster_ids, cluster_centers = regular_clustering(
+            cluster_ids = regular_clustering(
                 chunk_spk_embs, n_clusters=num_clusters,
                 # Y=chunk_T_hat, th_silent=silent_threshold,
                 method=cluster_method,

@@ -68,7 +68,7 @@ def get_cannot_link_pairs(X, exclude=None):
     return cannot_link
 
 
-def increasing_ids(clusters, centers):
+def increasing_ids(clusters, centers=None):
     """Remap clusters to be increasing order, and adjust centers accordingly.
 
     This should change [1, 2, 0, 1, 1] -> [0, 1, 2, 0, 0].
@@ -80,8 +80,8 @@ def increasing_ids(clusters, centers):
             id_map[value] = id_real
             id_real += 1  
     new_clusters = [id_map[v] for v in clusters]
-    new_centers = [centers[id_map[i]] for i in range(len(centers))]
-    return new_clusters, new_centers
+    # new_centers = [centers[id_map[i]] for i in range(len(centers))]
+    return new_clusters
 
 
 def _find_duplicate(numbers):
@@ -177,7 +177,7 @@ def contraint_kmeans(X, n_clusters, Y=None, th_silent=0.05):
 
     Returns:
         clusters (List[List[int]]): clusters ids correspond. to each embedding
-        centers (List[np.ndarray]): list of embeddings of each cluster center
+        # centers (List[np.ndarray]): list of embeddings of each cluster center
     """
     silences = None
     if th_silent > 0 and Y is not None:
@@ -198,7 +198,7 @@ def contraint_kmeans(X, n_clusters, Y=None, th_silent=0.05):
         # import pdb; pdb.set_trace()
         raise
     # remap cluster index in ascending order.
-    clusters_, centers_ = increasing_ids(clusters_, centers_)
+    clusters_ = increasing_ids(clusters_, centers_)
     # silences may result duplicate assign of cluster id due to removal of
     # can not link for these pair, thus need to resolve them
     if silences is not None:
@@ -214,7 +214,7 @@ def contraint_kmeans(X, n_clusters, Y=None, th_silent=0.05):
             k += 1
         cluster_ids.append(chunk_result)
     assert k == len(clusters_)
-    return cluster_ids, centers_
+    return cluster_ids
 
 
 def regular_clustering(X, n_clusters, Y=None, th_silent=0.05, method="kmeans"):
@@ -234,7 +234,6 @@ def regular_clustering(X, n_clusters, Y=None, th_silent=0.05, method="kmeans"):
 
     Returns:
         clusters (List[List[int]]): clusters ids correspond. to each embedding
-        centers (List[np.ndarray]): list of embeddings of each cluster center
     """
     padded_X = np.vstack(X)  # [(C, FS)] -> (sum(C), FS)
     try:
@@ -248,13 +247,13 @@ def regular_clustering(X, n_clusters, Y=None, th_silent=0.05, method="kmeans"):
         else:
             raise NotImplementedError(f"Invalid clustering method: {method}")
         clusters_ = clustered.labels_
-        centers_ = clustered.cluster_centers_
+        # centers_ = clustered.cluster_centers_
     except Exception as err:
         print(err)
         # import pdb; pdb.set_trace()
         raise
     # remap cluster index in ascending order.
-    clusters_, centers_ = increasing_ids(clusters_, centers_)
+    clusters_ = increasing_ids(clusters_)
     # reshape cluster_ to that of X
     cluster_ids = []
     k = 0
@@ -265,4 +264,4 @@ def regular_clustering(X, n_clusters, Y=None, th_silent=0.05, method="kmeans"):
             k += 1
         cluster_ids.append(chunk_result)
     assert k == len(clusters_)
-    return cluster_ids, centers_
+    return cluster_ids
