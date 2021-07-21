@@ -467,7 +467,8 @@ class EENDModel(chainer.Chain):
             out_chunks = [np.insert(o, o.shape[1], np.zeros((max_n_speakers - o.shape[1], o.shape[0])), axis=1) for o in out_chunks]
             # outdata: --vstack-> (B, T, max_n_speakers)
             outdata = np.vstack(out_chunks)
-        return outdata
+        result = {'T_hat': outdata}
+        return result
 
     def load_npz(self, npz_file, **kwargs):
         serializers.load_npz(npz_file, self)
@@ -750,7 +751,6 @@ class TransformerVectorDiarization(EENDModel):
         chunk_size,
         out_dir,
         save_attention_weight,
-        save_speaker_embs=True,
         num_clusters=-1,
         silent_threshold=0.0,
         **kwargs,
@@ -802,6 +802,7 @@ class TransformerVectorDiarization(EENDModel):
                 _out_chunks[i][:, _chunk_cluster_ids] = out_chunks[i]  # fill (T, C*) with (T, C)
             # stack [(T, C*)] --> (B*T, C*)
             outdata = np.vstack(_out_chunks)
+            result = {'T_hat': outdata}
         else:
             max_n_speakers = max([o.shape[1] for o in out_chunks])
             # out_chunks: padding [(T, speaker_active)]  --> [(T, max_n_speakers)]
@@ -812,14 +813,12 @@ class TransformerVectorDiarization(EENDModel):
             # FIXME out_spk_embs list of (C, S), can be different C across chunk for EDA
             out_spks = np.vstack(out_spk_embs)
             chunk_sizes = np.array([o.shape[0] for o in out_chunks])
-            if save_speaker_embs:
-                spk_path = os.path.join(out_dir, f"{recid}.spk.h5")
-                import h5py
-                with h5py.File(spk_path, 'w') as wf:
-                    wf.create_dataset('T_hat', data=outdata)
-                    wf.create_dataset('out_spks', data=out_spks)
-                    wf.create_dataset('chunk_sizes', data=chunk_sizes)
-        return outdata
+            result = {
+                'T_hat': outdata,
+                'out_spks': out_spks,
+                'chunk_sizes': chunk_sizes,
+            }
+        return result
 
     def save_attention_weight(self, ofile, batch_index=0):
         att_weights = []

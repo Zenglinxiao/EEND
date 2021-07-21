@@ -104,7 +104,7 @@ def infer(args):
         Y = feature.transform(Y, transform_type=args.input_transform)
         Y = feature.splice(Y, context_size=args.context_size)
         Y = Y[::args.subsampling]
-        outdata = model.inference(
+        result = model.inference(
             Y,
             recid=recid,
             **inference_kwargs
@@ -112,4 +112,5 @@ def infer(args):
         outfname = recid + '.h5'
         outpath = os.path.join(args.out_dir, outfname)
         with h5py.File(outpath, 'w') as wf:
-            wf.create_dataset('T_hat', data=outdata)
+            for k, v in result.items():
+                wf.create_dataset(k, data=v)
