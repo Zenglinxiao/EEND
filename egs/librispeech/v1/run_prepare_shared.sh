@@ -15,7 +15,7 @@ stage=0
 
 DATA_ROOT=$PWD/data
 libri_root=$DATA_ROOT/local/LibriSpeech
-train_sets="train-clean-100 train-clean-300 train-other-500"
+train_sets="train-clean-100 train-clean-360 train-other-500"
 dev_sets="dev-clean test-clean"
 musan_root=$DATA_ROOT/local/MUSAN
 # This script distributes simulated data under these directories
