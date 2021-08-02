@@ -831,8 +831,11 @@ class TransformerVectorDiarization(EENDModel):
         # save as (n_layers, h, T, T)-shaped arryay
         np.save(ofile, np.array(att_weights))
 
-    def load_npz(self, npz_file, eval=False):
-        ignore_names = lambda x: "global_spk_loss" in x if eval else None
+    def load_npz(self, npz_file, eval=False, resume=True):
+        ignore_names = None
+        if eval or not resume:
+            print("Do not load for GlobalSpeakerEmbeddingsLoss!")
+            ignore_names = lambda x: "global_spk_loss" in x
         serializers.load_npz(npz_file, self, ignore_names=ignore_names)
 
 

@@ -173,7 +173,7 @@ def train(args):
     # Init/Resume
     if args.initmodel:
         print('Load model from', args.initmodel)
-        serializers.load_npz(args.initmodel, model)
+        model.load_npz(args.initmodel, resume=args.resume)
 
     train_iter = iterators.MultiprocessIterator(
         train_set,
