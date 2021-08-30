@@ -8,7 +8,9 @@ import h5py
 import numpy as np
 import os
 from scipy.signal import medfilt
-from eend.clusters import regular_clustering  #, contraint_kmeans
+from eend.clusters import regular_clustering, rechunk_prediction
+from eend.kaldi_data import KaldiData
+from eend.resemblyzer import get_resemblyzer_model, resemblyzer_realign_main
 
 
 parser = argparse.ArgumentParser(description='make rttm from decoded result')
@@ -24,36 +26,13 @@ vector_args.add_argument('--num-clusters', default=-1, type=int)
 vector_args.add_argument('--cluster-method', default="none", type=str,
                          choices=["none", "kmeans", "ahc", "sc", "cop_kmeans"],
                          help='clustering method to use')
+vector_args.add_argument('--d-vector', action='store_true', help='enable d-vector realigning')
+vector_args.add_argument('--kaldi_data_dir', help='original kaldi-like data')
 
 args = parser.parse_args()
-
+print(f"args: {args}")
 filepaths = [line.strip() for line in open(args.file_list_hdf5)]
 filepaths.sort()
-
-
-def rechunk_data(T_hat, spk_embs, chunk_sizes):
-    """Split T_hat and spk_embs into chunks as described in chunk_sizes.
-
-    Example:
-        T_hat shape in (5980, 2),
-        spk_embs shape in (24, 256)
-        chunk_sizes [500, ..., 480] 11 500 followed by 480
-        -> chunk_T_hat: [(500, 2)*11, (480, 2)]
-        -> chunk_spk_embs: [(2, 256) * 12]
-    """
-    # rebuild T_hat in chunk as in shape [(#frames, #spk)]
-    _cumsum_chunk_sizes = np.cumsum(chunk_sizes)
-    chunk_T_hat = np.split(T_hat, _cumsum_chunk_sizes[:-1])
-    # NOTE! can have different active speaker for each chunk as in EDA
-    # in this case, need another field num_spk!
-    num_spk = [arr.shape[1] for arr in chunk_T_hat]
-    # rebuild out_spks in chunk as in shape [(#spk, #emb_size)]
-    _cumsum_num_spk = np.cumsum(num_spk)
-    if _cumsum_num_spk[-1] != spk_embs.shape[0]:
-        msg = f"spk embedding shape {spk_embs.shape}, chunk speaker {num_spk}"
-        raise ValueError(f"Input argument not match: {msg}")
-    chunk_spk_embs= np.split(spk_embs, _cumsum_num_spk[:-1])
-    return chunk_T_hat, chunk_spk_embs
 
 
 def fill_within_right_cluster(T_hat, chunked_T_hat, cluster_ids, n_clusters=None):
@@ -102,17 +81,13 @@ def predict(data, threshold, num_clusters, cluster_method):
             if field_name not in data:
                 raise ValueError(f"Missing {field_name} for clustering!")
         # extract ndarray from h5py Dataset
-        chunk_sizes = data['chunk_sizes'][:]
         _T_hat = data['T_hat'][:]
-        _out_spks = data['out_spks'][:]
         # sanity check
         max_n_speakers = _T_hat.shape[1]
         if max_n_speakers > num_clusters:
             raise RuntimeError("num_clusters is set too low")
         # rebuild embs chunks from data
-        chunk_T_hat, chunk_spk_embs = rechunk_data(
-            _T_hat, _out_spks, chunk_sizes
-        )
+        chunk_T_hat, chunk_spk_embs, chunk_sizes = rechunk_prediction(data)
         # clustering by speaker embeddings, return cluster id
         # in list of list id as shape (#chunk, #speaker)
         if cluster_method == "cop_kmeans":
@@ -145,16 +120,38 @@ def predict(data, threshold, num_clusters, cluster_method):
     return a
 
 
+voice_encoder_model, kaldi_obj = None, None
+if args.d_vector:
+    if args.kaldi_data_dir is None:
+        raise argparse.ArgumentError("--kaldi_data_dir is needed when use d-vector.")
+    kaldi_obj = KaldiData(args.kaldi_data_dir)
+    voice_encoder_model = get_resemblyzer_model()
+
+
 with open(args.out_rttm_file, 'w') as wf:
     for filepath in filepaths:
         session, _ = os.path.splitext(os.path.basename(filepath))
         data = h5py.File(filepath, 'r')
-        a = predict(
-            data,
-            threshold=args.threshold,
-            num_clusters=args.num_clusters,
-            cluster_method=args.cluster_method,
-        )
+        if voice_encoder_model is not None:
+            _T_hat_reordered = resemblyzer_realign_main(
+                recid=session,
+                resemblyzer_model=voice_encoder_model,
+                kaldi_obj=kaldi_obj,
+                predict_h5=data,
+                threshold=args.threshold,
+                median=args.median,
+                frame_shift=args.frame_shift,
+                subsampling=args.subsampling,
+            )
+            a = np.where(_T_hat_reordered > args.threshold, 1, 0)
+        else:
+            a = predict(
+                data,
+                threshold=args.threshold,
+                num_clusters=args.num_clusters,
+                cluster_method=args.cluster_method,
+                d_vector_model=voice_encoder_model,
+            )
         # a = np.where(data['T_hat'][:] > args.threshold, 1, 0)
         if args.median > 1:
             a = medfilt(a, (args.median, 1))

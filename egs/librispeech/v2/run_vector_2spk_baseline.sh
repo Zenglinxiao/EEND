@@ -3,7 +3,7 @@
 # Copyright 2021 Ubiqus Labs. (author: Linxiao ZENG)
 # Licensed under the MIT license.
 #
-stage=7
+stage=8
 EXP_DIR=exp_vector_2spk
 # The datasets for training must be formatted as kaldi data directory.
 # Also, make sure the audio files in wav.scp are 'regular' wav files.
@@ -15,7 +15,7 @@ adapt_valid_set=data/npr/npr_tal_2spk.dev.8k
 
 # Base config files for {train,infer}.py
 train_config=conf/vector/train_2spk_l2norm.yaml # train.yaml
-infer_config=conf/vector/infer_2spk_l2norm.yaml # _chunk500
+infer_config=conf/vector/infer_2spk_l2norm_chunk500.yaml # _chunk500
 adapt_config=conf/vector/adapt_2spk_l2norm.yaml
 
 # Additional arguments passed to {train,infer}.py.
@@ -261,7 +261,7 @@ if [ $stage -le 7 ]; then
     done
 fi
 
-scoring_dir=$EXP_DIR/diarize/scoring/$model_id.$ave_id.$adapt_config_id.$adapt_ave_id.${infer_config_id}
+scoring_dir=$EXP_DIR/diarize/scoring/$model_id.$ave_id.$adapt_config_id.$adapt_ave_id.${infer_config_id}_dvector
 if [ $stage -le 8 ]; then
     echo "scoring at $scoring_dir"
     if [ -d $scoring_dir ]; then
@@ -275,20 +275,21 @@ if [ $stage -le 8 ]; then
             echo " if you want to retry, please remove it."
             exit 1
         fi
-        # gold_nspk=`echo "$dset" | grep "[1-9]*spk" -o | sed "s/spk//g"`
-        gold_nspk=-1
+        gold_nspk=`echo "$dset" | grep "[1-9]*spk" -o | sed "s/spk//g"`
+        # gold_nspk=-1
+        d_vector_kwargs="--d-vector --kaldi_data_dir data/$dset"
 	    work=$scoring_dir/$dset/.work
         mkdir -p $work
         file_list_dset=$work/file_list_`basename $dset`
         find $infer_dir/$dset -iname "*.h5" > $file_list_dset
         # for med in 1 11; do
         med=11
-        # for method in $CLUSTER_METHOD; do
-        for method in none; do
+        for method in $CLUSTER_METHOD; do
+        # for method in none; do
             for th in 0.3 0.4 0.5 0.6 0.7; do
                 make_rttm.py --median=$med --threshold=$th \
                     --frame_shift=$infer_frame_shift --subsampling=$infer_subsampling --sampling_rate=$infer_sampling_rate \
-                    --num-clusters $gold_nspk --cluster-method $method \
+                    --num-clusters $gold_nspk --cluster-method $method $d_vector_kwargs \
                     $file_list_dset $scoring_dir/$dset/hyp_${method}_${th}_$med.rttm
                 # -r data/eval/$dset/rttm \
                 md-eval.pl -c 0.25 \

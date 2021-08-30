@@ -4,6 +4,34 @@ from cop_kmeans import cop_kmeans
 from sklearn.cluster import KMeans, AgglomerativeClustering, SpectralClustering
 
 
+def rechunk_prediction(predict_h5):
+    """Split T_hat and spk_embs into chunks as described in chunk_sizes.
+
+    Example:
+        T_hat shape in (5980, 2),
+        spk_embs shape in (24, 256)
+        chunk_sizes [500, ..., 480] 11 500 followed by 480
+        -> chunk_T_hat: [(500, 2)*11, (480, 2)]
+        -> chunk_spk_embs: [(2, 256) * 12]
+    """
+    chunk_sizes = predict_h5['chunk_sizes'][:]
+    T_hat = predict_h5['T_hat'][:]
+    spk_embs = predict_h5['out_spks'][:]
+    # rebuild T_hat in chunk as in shape [(#frames, #spk)]
+    _cumsum_chunk_sizes = np.cumsum(chunk_sizes)
+    chunk_T_hat = np.split(T_hat, _cumsum_chunk_sizes[:-1])
+    # NOTE! can have different active speaker for each chunk as in EDA
+    # in this case, need another field num_spk!
+    num_spk = [arr.shape[1] for arr in chunk_T_hat]
+    # rebuild out_spks in chunk as in shape [(#spk, #emb_size)]
+    _cumsum_num_spk = np.cumsum(num_spk)
+    if _cumsum_num_spk[-1] != spk_embs.shape[0]:
+        msg = f"spk embedding shape {spk_embs.shape}, chunk speaker {num_spk}"
+        raise ValueError(f"Input argument not match: {msg}")
+    chunk_spk_embs= np.split(spk_embs, _cumsum_num_spk[:-1])
+    return chunk_T_hat, chunk_spk_embs, chunk_sizes
+
+
 def transitive_tuple(index_set):
     """Return transitive set for index list.
     
