@@ -8,7 +8,7 @@ import h5py
 import numpy as np
 import os
 from scipy.signal import medfilt
-from eend.clusters import regular_clustering, rechunk_prediction
+from eend.clusters import regular_clustering, rechunk_prediction, contraint_kmeans
 from eend.kaldi_data import KaldiData
 from eend.resemblyzer import get_resemblyzer_model, resemblyzer_realign_main
 
@@ -26,6 +26,7 @@ vector_args.add_argument('--num-clusters', default=-1, type=int)
 vector_args.add_argument('--cluster-method', default="none", type=str,
                          choices=["none", "kmeans", "ahc", "sc", "cop_kmeans"],
                          help='clustering method to use')
+vector_args.add_argument('--silent_threshold', default=0.00, type=float, help="0.05")
 vector_args.add_argument('--d-vector', action='store_true', help='enable d-vector realigning')
 vector_args.add_argument('--kaldi_data_dir', help='original kaldi-like data')
 
@@ -74,7 +75,7 @@ def fill_within_right_cluster(T_hat, chunked_T_hat, cluster_ids, n_clusters=None
     return T_hat_clustered
 
 
-def predict(data, threshold, num_clusters, cluster_method):
+def predict(data, threshold, num_clusters, cluster_method, silent_threshold=0.05):
     """Get prediction based on data and threshold, may involve clustering."""
     if cluster_method != "none":
         for field_name in ["out_spks", "chunk_sizes"]:
@@ -93,13 +94,16 @@ def predict(data, threshold, num_clusters, cluster_method):
         # clustering by speaker embeddings, return cluster id
         # in list of list id as shape (#chunk, #speaker)
         if cluster_method == "cop_kmeans":
-            raise NotImplementedError("Currently do this in infer.py")
             # perform instance constrained clustering:
             # cluster id in same chunk suppose to be different
-            # cluster_ids = contraint_kmeans(
-            #     chunk_spk_embs, n_clusters=num_clusters,
-            #     Y=chunk_T_hat, th_silent=silent_threshold,
-            # )
+            try:
+                cluster_ids = contraint_kmeans(
+                    chunk_spk_embs, n_clusters=num_clusters,
+                    Y=chunk_T_hat, th_silent=silent_threshold,
+                )
+            except Exception as err:
+                print(err)
+                raise
         else:
             # perform unconstrained clustering (kmeans/ahc/sc):
             # may assign same cluster id for speaker in the same chunk
@@ -108,15 +112,15 @@ def predict(data, threshold, num_clusters, cluster_method):
                 # Y=chunk_T_hat, th_silent=silent_threshold,
                 method=cluster_method,
             )
-            # resolve same speaker id in a single chunk
-            # fill a w/ chunk_T_hat as cluster_ids while fix conflict
-            T_hat = fill_within_right_cluster(
-                _T_hat,
-                chunk_T_hat,
-                cluster_ids,
-                n_clusters=num_clusters,
-            )
-            a = np.where(T_hat > threshold, 1, 0)
+        # resolve same speaker id in a single chunk
+        # fill a w/ chunk_T_hat as cluster_ids while fix conflict
+        T_hat = fill_within_right_cluster(
+            _T_hat,
+            chunk_T_hat,
+            cluster_ids,
+            n_clusters=num_clusters,
+        )
+        a = np.where(T_hat > threshold, 1, 0)
     else:
         a = np.where(data['T_hat'][:] > threshold, 1, 0)
     return a
@@ -154,6 +158,7 @@ with open(args.out_rttm_file, 'w') as wf:
                 threshold=args.threshold,
                 num_clusters=args.num_clusters,
                 cluster_method=args.cluster_method,
+                silent_threshold=args.silent_threshold,
             )
         # a = np.where(data['T_hat'][:] > args.threshold, 1, 0)
         if args.median > 1:
