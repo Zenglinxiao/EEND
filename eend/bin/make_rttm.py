@@ -87,7 +87,9 @@ def predict(data, threshold, num_clusters, cluster_method):
         if max_n_speakers > num_clusters:
             raise RuntimeError("num_clusters is set too low")
         # rebuild embs chunks from data
-        chunk_T_hat, chunk_spk_embs, chunk_sizes = rechunk_prediction(data)
+        predict_chunks = rechunk_prediction(data)
+        chunk_T_hat = predict_chunks['T_hat']
+        chunk_spk_embs = predict_chunks['out_spks']
         # clustering by speaker embeddings, return cluster id
         # in list of list id as shape (#chunk, #speaker)
         if cluster_method == "cop_kmeans":
@@ -142,6 +144,8 @@ with open(args.out_rttm_file, 'w') as wf:
                 median=args.median,
                 frame_shift=args.frame_shift,
                 subsampling=args.subsampling,
+                num_clusters=args.num_clusters,
+                cluster_method=args.cluster_method,
             )
             a = np.where(_T_hat_reordered > args.threshold, 1, 0)
         else:
@@ -150,11 +154,13 @@ with open(args.out_rttm_file, 'w') as wf:
                 threshold=args.threshold,
                 num_clusters=args.num_clusters,
                 cluster_method=args.cluster_method,
-                d_vector_model=voice_encoder_model,
             )
         # a = np.where(data['T_hat'][:] > args.threshold, 1, 0)
         if args.median > 1:
             a = medfilt(a, (args.median, 1))
+        # reorder a by number of active frame for each speaker
+        _mean_active_level_order = np.argsort(a.mean(axis=0))[::-1]
+        a = a[:, _mean_active_level_order]
         for spkid, frames in enumerate(a.T):
             frames = np.pad(frames, (1, 1), 'constant')
             changes, = np.where(np.diff(frames, axis=0) != 0)

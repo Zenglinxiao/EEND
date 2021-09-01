@@ -465,9 +465,10 @@ class EENDModel(chainer.Chain):
             # out_chunks: padding [(T, speaker_active)]  --> [(T, max_n_speakers)]
             # FIXME: where inter-chunk label permutation comes
             out_chunks = [np.insert(o, o.shape[1], np.zeros((max_n_speakers - o.shape[1], o.shape[0])), axis=1) for o in out_chunks]
-            # outdata: --vstack-> (B, T, max_n_speakers)
+            # outdata: --vstack-> (B*T, max_n_speakers)
             outdata = np.vstack(out_chunks)
-        result = {'T_hat': outdata}
+        chunk_sizes = np.array([o.shape[0] for o in out_chunks])
+        result = {'T_hat': outdata, 'chunk_sizes': chunk_sizes}
         return result
 
     def load_npz(self, npz_file, **kwargs):
@@ -902,7 +903,7 @@ class TransformerEDADiarization(EENDModel):
         ys = [F.matmul(e, att, transb=True) for e, att in zip(emb, attractors)]
         ys = [F.sigmoid(y) for y in ys]
         for p, y in zip(probs, ys):
-            if n_speakers is not None:
+            if n_speakers is not None and n_speakers > 0:
                 ys_active.append(y[:, :n_speakers])  # (T, n_speakers)
             elif th is not None:  # \tau in equation 8
                 # return indices of elements that are non-zeros: (max_n_speakers) -> (speakers_silent)

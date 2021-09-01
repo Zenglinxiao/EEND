@@ -94,7 +94,9 @@ def dvector_chunked_record(
     return list of partial_embs
     """
     # prepare the inference into desired form
-    T_hat_chunk, _, _chunk_sizes = rechunk_prediction(predict_h5)
+    predict_chunks = rechunk_prediction(predict_h5)
+    T_hat_chunk = predict_chunks['T_hat']
+    _chunk_sizes = predict_chunks['chunk_sizes']
 
     num_chunks = len(_chunk_sizes)
     assert len(T_hat_chunk) == num_chunks, "chunk_size not match"
@@ -126,17 +128,20 @@ def dvector_chunked_record(
     return all_partials_embeds, T_hat_chunk
 
 
-def reorder_by_mass(T_hat, cluster_ids):
+def reorder_by_mass(T_hat, cluster_ids, n_clusters=None):
     """Return reordered T_hat according to freqs of cluster_ids.
 
     Args:
         T_hat (ndarray): shape in (n_frames, n_spks)
         cluster_ids (List[int]): 0 <= values < n_spks
+        n_clusters (int): number of cluster after reorder.
 
     Returns:
         T_hat_reordered (ndarray) reordered on axis=1
     """
     _n_spks = T_hat.shape[1]
+    if n_clusters is not None and n_clusters > _n_spks:
+        _n_spks = n_clusters
     cluster_id_counts = Counter(cluster_ids)
     # update count with all spk id only to make sure all id is present
     cluster_id_counts.update(list(range(_n_spks)))
@@ -147,16 +152,22 @@ def reorder_by_mass(T_hat, cluster_ids):
     # sort desending by EEND prediction logit level
     T_hat_mass_order = np.argsort(T_hat_mass)[::-1]
     T_hat_reordered = np.zeros_like(T_hat)
-    T_hat_reordered[:, cluster_id_mass_order] = T_hat[:, T_hat_mass_order]
+    try:
+        T_hat_reordered[:, cluster_id_mass_order] = T_hat[:, T_hat_mass_order]
+    except Exception as err:
+        print(f"{cluster_id_mass_order} - {T_hat_mass_order}")
+        raise
     return T_hat_reordered
 
 
 def reorder_That_by_dvector(T_hat_chunks, d_vector_chunks, n_clusters=None, clustering_method="kmeans"):
     # print(f"shape: {[arr.shape for arr in T_hat_chunks]}")
-    if n_clusters is None:
-        n_clusters = T_hat_chunks[0].shape[1]
+    if n_clusters is None or n_clusters <= 0:
+        n_clusters = max([arr.shape[1] for arr in T_hat_chunks])
         # print(f"Infer num_clusters to be: {n_clusters}")
     assert len(T_hat_chunks) == len(d_vector_chunks), "input not match"
+    if n_clusters == 1:
+        return T_hat_chunks
     num_chunks = len(T_hat_chunks)
     # clustering on all_partials_embeds and return cluster_id group for each chunk's partials
     all_cluster_ids = regular_clustering(d_vector_chunks, n_clusters, method=clustering_method)  # shape: (num_chunks, n_partials)
@@ -166,7 +177,7 @@ def reorder_That_by_dvector(T_hat_chunks, d_vector_chunks, n_clusters=None, clus
         chunk_cluster_ids = all_cluster_ids[chunk_i]
         T_hat_chunk_i = T_hat_chunks[chunk_i]
         try:
-            reordered_T_hat_chunk_i = reorder_by_mass(T_hat_chunk_i, chunk_cluster_ids)
+            reordered_T_hat_chunk_i = reorder_by_mass(T_hat_chunk_i, chunk_cluster_ids, n_clusters)
         except AssertionError as err:
             print(f"number Cluster: {n_clusters}")
             print(all_cluster_ids)
@@ -184,12 +195,17 @@ def resemblyzer_realign_main(
     median,
     frame_shift,
     subsampling,
+    num_clusters,
+    cluster_method,
 ):
     """Main entry point to realign T_hat based on d_vector embeddings."""
     dvector_embs_chunks, T_hat_chunks = dvector_chunked_record(
         recid, resemblyzer_model, kaldi_obj, predict_h5,
         threshold, median, frame_shift, subsampling,
     )
-    reordered_T_hat = reorder_That_by_dvector(T_hat_chunks, dvector_embs_chunks)
+    reordered_T_hat = reorder_That_by_dvector(
+        T_hat_chunks, dvector_embs_chunks,
+        n_clusters=num_clusters, clustering_method=cluster_method,
+    )
     realigned_T_hat = np.concatenate(reordered_T_hat, axis=0)
     return realigned_T_hat

@@ -16,7 +16,6 @@ def rechunk_prediction(predict_h5):
     """
     chunk_sizes = predict_h5['chunk_sizes'][:]
     T_hat = predict_h5['T_hat'][:]
-    spk_embs = predict_h5['out_spks'][:]
     # rebuild T_hat in chunk as in shape [(#frames, #spk)]
     _cumsum_chunk_sizes = np.cumsum(chunk_sizes)
     chunk_T_hat = np.split(T_hat, _cumsum_chunk_sizes[:-1])
@@ -25,11 +24,17 @@ def rechunk_prediction(predict_h5):
     num_spk = [arr.shape[1] for arr in chunk_T_hat]
     # rebuild out_spks in chunk as in shape [(#spk, #emb_size)]
     _cumsum_num_spk = np.cumsum(num_spk)
-    if _cumsum_num_spk[-1] != spk_embs.shape[0]:
-        msg = f"spk embedding shape {spk_embs.shape}, chunk speaker {num_spk}"
-        raise ValueError(f"Input argument not match: {msg}")
-    chunk_spk_embs= np.split(spk_embs, _cumsum_num_spk[:-1])
-    return chunk_T_hat, chunk_spk_embs, chunk_sizes
+    predict_chunks = {
+        'chunk_sizes': chunk_sizes,
+        'T_hat': chunk_T_hat
+    }
+    if 'out_spks' in predict_h5:
+        spk_embs = predict_h5['out_spks'][:]
+        if _cumsum_num_spk[-1] != spk_embs.shape[0]:
+            msg = f"spk embedding shape {spk_embs.shape}, chunk speaker {num_spk}"
+            raise ValueError(f"Input argument not match: {msg}")
+        predict_chunks['out_spks']= np.split(spk_embs, _cumsum_num_spk[:-1])
+    return predict_chunks
 
 
 def transitive_tuple(index_set):
