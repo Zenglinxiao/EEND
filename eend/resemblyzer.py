@@ -148,7 +148,7 @@ def reorder_by_mass(T_hat, cluster_ids, n_clusters=None):
     cluster_id_mass_order = [k for k, _ in cluster_id_counts.most_common()]
     assert list(range(_n_spks)) == sorted(cluster_id_mass_order), \
         f"{cluster_id_mass_order} not match {_n_spks}"
-    T_hat_mass = np.sum(T_hat, axis=0)
+    T_hat_mass = np.sum(T_hat, axis=0)  # NOTE n_clusters > _n_spks
     # sort desending by EEND prediction logit level
     T_hat_mass_order = np.argsort(T_hat_mass)[::-1]
     T_hat_reordered = np.zeros_like(T_hat)
@@ -161,10 +161,13 @@ def reorder_by_mass(T_hat, cluster_ids, n_clusters=None):
 
 
 def reorder_That_by_dvector(T_hat_chunks, d_vector_chunks, n_clusters=None, clustering_method="kmeans"):
-    # print(f"shape: {[arr.shape for arr in T_hat_chunks]}")
+    n_clusters_max = max([arr.shape[1] for arr in T_hat_chunks])
     if n_clusters is None or n_clusters <= 0:
-        n_clusters = max([arr.shape[1] for arr in T_hat_chunks])
-        # print(f"Infer num_clusters to be: {n_clusters}")
+        # infer when not given
+        n_clusters = n_clusters_max
+    elif n_clusters > n_clusters_max:
+        # fix for predicted with less spk
+        n_clusters = n_clusters_max
     assert len(T_hat_chunks) == len(d_vector_chunks), "input not match"
     if n_clusters == 1:
         return T_hat_chunks
